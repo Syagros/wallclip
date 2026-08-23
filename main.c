@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include <libgen.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -5,6 +6,7 @@
 #include <stdint.h>
 #include <unistd.h>
 #include <inttypes.h>
+#include <openssl/evp.h>
 #include <magic.h>
 #include <MagickWand/MagickWand.h>
 
@@ -28,6 +30,30 @@ void format_bytes(uint64_t bytes, char *out, size_t out_size) {
   } else {
     snprintf(out, out_size, "%.2f %s", size, units[unit_index]);
   }
+}
+
+static char *make_slug(const char *title) {
+	size_t len = strlen(title);
+	char *slug = malloc(len + 1);
+	if (!slug) return NULL;
+
+	char *out = slug;
+	int last_was_hyphen = 1; /* suppress leading hyphens */
+
+	for (const unsigned char *p = (const unsigned char *)title; *p; p++) {
+		if (isalnum(*p)) {
+			*out++ = (char)tolower(*p);
+			last_was_hyphen = 0;
+		} else if (!last_was_hyphen) {
+			*out++ = '-';
+			last_was_hyphen = 1;
+		}
+	}
+	if (out > slug && *(out - 1) == '-')
+		out--;
+
+	*out = '\0';
+	return slug;
 }
 
 void *getDimensions(const char *image, const char *thumbnail) {
@@ -96,9 +122,28 @@ int main(int argc, char **argv) {
 
   ImageDims *imageDims = (ImageDims *)getDimensions(argv[1], argv[2]);
   char mime_type_buf[32];
-  FILE *f = fopen(argv[1], "r");
+  FILE *f = fopen(argv[1], "rb");
   fseek(f, 0L, SEEK_END);
-  long int res = ftell(f);
+  size_t res = ftell(f);
+  fseek(f, 0L, SEEK_SET);
+
+  unsigned char *img_buf = malloc(res);
+  if (!img_buf)
+    printf("Failed to allocate space for img_buf");
+
+  int nread = fread(img_buf, 1, res, f);
+  if (nread != 0) {
+    printf("Failed to read file.");
+  }
+  unsigned char md[32];
+  unsigned int md_len;
+
+  EVP_Digest(img_buf, res, md, &md_len, EVP_sha256(), NULL);
+  char hex[65];
+  for (unsigned int i = 0; i < md_len; i++)
+    sprintf(hex + i * 2, "%02x", md[i]);
+  hex[64] = '\0';
+  free(img_buf);
 
   magic_t mime = magic_open(MAGIC_MIME_TYPE);
   magic_load(mime,NULL);
@@ -114,11 +159,14 @@ int main(int argc, char **argv) {
   if (dot && dot != title ) {
     *dot = '\0';
   }
-
-  printf("title: %s",title);
+  char *slug = make_slug(title);
+  printf("title: %s\n",title);
+  printf("slug: %s\n",slug);
+  printf("hash: %s\n", hex);
 
   fclose(f);
   free(imageDims);
+  free(slug);
   magic_close(mime);
   return 0;
 }
