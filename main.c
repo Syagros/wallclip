@@ -1,5 +1,7 @@
+#include <libgen.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <stdint.h>
 #include <unistd.h>
 #include <inttypes.h>
@@ -91,6 +93,7 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Usage: %s image thumbnail\n", argv[0]);
     return 1;
   }
+
   ImageDims *imageDims = (ImageDims *)getDimensions(argv[1], argv[2]);
   char mime_type_buf[32];
   FILE *f = fopen(argv[1], "r");
@@ -104,7 +107,15 @@ int main(int argc, char **argv) {
   format_bytes(res, mime_type_buf, sizeof(mime_type_buf));
 
   printf("%s %s %s\n", mime_type_buf, argv[1], mime_type);
-  printf("width: %zu\nheight: %zu", imageDims->width, imageDims->height);
+  printf("width: %zu\nheight: %zu\n", imageDims->width, imageDims->height);
+
+  char *title = basename(argv[1]);
+  char *dot = strrchr(title, '.');
+  if (dot && dot != title ) {
+    *dot = '\0';
+  }
+
+  printf("title: %s",title);
 
   fclose(f);
   free(imageDims);
