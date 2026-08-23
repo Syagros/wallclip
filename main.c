@@ -87,7 +87,7 @@ static char *make_slug(const char *title) {
   return slug;
 }
 
-void *getDimensions(const char *image, const char *thumbnail) {
+void *getDimensions(const char *image, unsigned char **thumb_buf, size_t *thumb_size) {
 #define ThrowWandException(wand) \
 { \
   char \
@@ -134,10 +134,20 @@ MagickResetIterator(magick_wand);
 while (MagickNextImage(magick_wand) != MagickFalse)
   MagickResizeImage(magick_wand,640,360,LanczosFilter);
 
-status=MagickWriteImages(magick_wand,thumbnail,MagickTrue);
-
-if (status == MagickFalse)
+size_t blob_len;
+MagickSetImageFormat(magick_wand, "JPEG");
+unsigned char *blob = MagickGetImagesBlob(magick_wand, &blob_len);
+if (!blob)
   ThrowWandException(magick_wand);
+
+*thumb_buf = malloc(blob_len);
+if (!*thumb_buf) {
+  MagickRelinquishMemory(blob);
+  ThrowWandException(magick_wand);
+}
+memcpy(*thumb_buf, blob, blob_len);
+*thumb_size = blob_len;
+MagickRelinquishMemory(blob);
 
 magick_wand=DestroyMagickWand(magick_wand);
 MagickWandTerminus();
@@ -146,12 +156,15 @@ return (void *)imageDims;
 }
 
 int main(int argc, char **argv) {
-  if (argc < 3) {
-    fprintf(stderr, "Usage: %s image thumbnail\n", argv[0]);
+  if (argc < 2) {
+    fprintf(stderr, "Usage: %s image\n", argv[0]);
     return 1;
   }
 
-  ImageDims *imageDims = (ImageDims *)getDimensions(argv[1], argv[2]);
+  unsigned char *thumb_buf = NULL;
+  size_t thumb_size = 0;
+  ImageDims *imageDims = (ImageDims *)getDimensions(argv[1], &thumb_buf, &thumb_size);
+
   char *pgpass = NULL, *pguser = NULL, *pgdbname = NULL;
   char mime_type_buf[32];
   FILE *envf = fopen(".env", "r");
@@ -196,6 +209,7 @@ int main(int argc, char **argv) {
     free(pgdbname);
     return 1;
   }
+
   fseek(f, 0L, SEEK_END);
   size_t res = ftell(f);
   fseek(f, 0L, SEEK_SET);
@@ -234,18 +248,28 @@ int main(int argc, char **argv) {
 	return 1;
   }
 
+  char *embedding_str = malloc(vec_dim * 16 + 16);
+  char *ep = embedding_str;
+  ep += sprintf(ep, "[");
   for (int i = 0; i < vec_dim; i++) {
-	printf("%f%s", img_vec[i], (i < vec_dim - 1) ? ", " : "");
+    ep += sprintf(ep, "%f%s", img_vec[i], (i < vec_dim - 1) ? "," : "");
   }
-  printf("]\n");
+  sprintf(ep, "]");
 
-  if (!pgpass || !pguser || !pgdbname) {
-	fprintf(stderr, "PGPASS/PGUSER/PGDBNAME missing from .env\n");
-	free(pgpass);
-	free(pguser);
-	free(pgdbname);
-	return 1;
+  time_t created_at, modified_at, changed_at, accessed_at;
+  if (get_file_times(argv[1], &modified_at, &changed_at, &accessed_at) != 0) {
+    perror("get_file_times");
+    return 1;
   }
+
+  if (get_birthtime_linux(argv[1], &created_at) != 0) {
+    perror("get_birthtime_linux");
+    created_at = 0;
+  }
+
+  char created_str[32], updated_str[32];
+  strftime(created_str, sizeof(created_str), "%Y-%m-%d %H:%M:%S", localtime(&created_at));
+  strftime(updated_str, sizeof(updated_str), "%Y-%m-%d %H:%M:%S", localtime(&modified_at));
 
   char conninfo[256];
   snprintf(conninfo, sizeof(conninfo), "user=%s password=%s dbname=%s", pguser, pgpass, pgdbname);
@@ -262,17 +286,6 @@ int main(int argc, char **argv) {
 
   int ver = PQserverVersion(conn);
   printf("Server version: %d\n", ver);
-
-  time_t created_at, modified_at, changed_at, accessed_at;
-  if (get_file_times(argv[1], &modified_at, &changed_at, &accessed_at) != 0) {
-    perror("get_file_times");
-    return 1;
-  }
-
-  if (get_birthtime_linux(argv[1], &created_at) != 0) {
-    perror("get_birthtime_linux");
-    created_at = 0;
-  }
 
   unsigned char *img_buf = malloc(res);
   if (!img_buf)
@@ -291,7 +304,6 @@ int main(int argc, char **argv) {
   for (unsigned int i = 0; i < md_len; i++)
     sprintf(hex + i * 2, "%02x", md[i]);
   hex[64] = '\0';
-  free(img_buf);
 
   magic_t mime = magic_open(MAGIC_MIME_TYPE);
   magic_load(mime,NULL);
@@ -299,30 +311,91 @@ int main(int argc, char **argv) {
 
   format_bytes(res, mime_type_buf, sizeof(mime_type_buf));
 
-  printf("%s %s %s\n", mime_type_buf, argv[1], mime_type);
-  printf("width: %zu\nheight: %zu\n", imageDims->width, imageDims->height);
-
   char *title = basename(argv[1]);
   char *dot = strrchr(title, '.');
   if (dot && dot != title ) {
     *dot = '\0';
   }
   char *slug = make_slug(title);
-  printf("title: %s\n",title);
-  printf("slug: %s\n",slug);
-  printf("hash: %s\n", hex);
-  printf("Created: %s",  ctime(&created_at));
-  printf("Modified: %s", ctime(&modified_at));
-  printf("Changed:  %s", ctime(&changed_at));
-  printf("Accessed: %s", ctime(&accessed_at));
+
+  // Ensure slug uniqueness: append -n if base slug or -n variant already exists
+  {
+    const char *check_sql =
+      "SELECT slug FROM wallpapers WHERE slug = $1 OR slug LIKE $1 || '-%'";
+    const char *check_params[1] = { slug };
+    PGresult *check_res = PQexecParams(conn, check_sql, 1, NULL,
+                                        check_params, NULL, NULL, 0);
+
+    if (PQresultStatus(check_res) == PGRES_TUPLES_OK && PQntuples(check_res) > 0) {
+      int max_n = 0;
+      size_t base_len = strlen(slug);
+
+      for (int i = 0; i < PQntuples(check_res); i++) {
+        char *existing = PQgetvalue(check_res, i, 0);
+        size_t existing_len = strlen(existing);
+
+        if (existing_len == base_len && strcmp(existing, slug) == 0) {
+          if (max_n < 1) max_n = 1; // base slug taken, need at least -1
+          continue;
+        }
+        if (existing_len > base_len &&
+            strncmp(existing, slug, base_len) == 0 &&
+            existing[base_len] == '-') {
+          int n = atoi(existing + base_len + 1);
+          if (n >= max_n) max_n = n + 1;
+        }
+      }
+
+      if (max_n > 0) {
+        char *new_slug = malloc(base_len + 16);
+        sprintf(new_slug, "%s-%d", slug, max_n);
+        free(slug);
+        slug = new_slug;
+      }
+    }
+    PQclear(check_res);
+  }
+
+  char file_size_str[32], width_str[16], height_str[16];
+  snprintf(file_size_str, sizeof(file_size_str), "%zu", res);
+  snprintf(width_str, sizeof(width_str), "%zu", imageDims->width);
+  snprintf(height_str, sizeof(height_str), "%zu", imageDims->height);
+
+  const char *paramValues[12] = {
+    title, slug, (const char *)img_buf, (const char *)thumb_buf,
+    mime_type, file_size_str, width_str, height_str,
+    hex, embedding_str, created_str, updated_str
+  };
+  int paramLengths[12] = {
+    0, 0, (int)res, (int)thumb_size,
+    0, 0, 0, 0,
+    0, 0, 0, 0
+  };
+  int paramFormats[12] = {0,0,1,1,0,0,0,0,0,0,0,0};
+
+  const char *insert_sql =
+    "INSERT INTO wallpapers (title, slug, image, thumbnail, mime_type, "
+    "file_size, width, height, checksum, embedding, created_at, updated_at) "
+    "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::vector,$11,$12)";
+
+  PGresult *res_insert = PQexecParams(conn, insert_sql, 12, NULL,
+                                      paramValues, paramLengths, paramFormats, 0);
+  if (PQresultStatus(res_insert) != PGRES_COMMAND_OK) {
+    fprintf(stderr, "Insert failed for %s: %s\n", argv[1], PQresultErrorMessage(res_insert));
+  }
+  PQclear(res_insert);
+
   PQfinish(conn);
 
   // Cleanup
+  free(img_buf);
   clip_free(ctx);
   clip_image_u8_free(img0);
   clip_image_f32_free(img_res);
   fclose(f);
   free(imageDims);
+  free(embedding_str);
+  free(thumb_buf);
   free(slug);
   magic_close(mime);
   return 0;
