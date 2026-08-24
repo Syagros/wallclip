@@ -21,7 +21,8 @@
 typedef struct {
   size_t width;
   size_t height;
-} ImageDims;
+  char *thumb_path;
+} MagicResult;
 
 int get_birthtime_linux(const char *path, time_t *created_at) {
   struct statx stx;
@@ -29,7 +30,8 @@ int get_birthtime_linux(const char *path, time_t *created_at) {
     return -1;
   }
   if (!(stx.stx_mask & STATX_BTIME)) {
-    return -1; // filesystem doesn't support btime
+    printf("Filesystem doesn't support btime.");
+    return -1; 
   }
   *created_at = stx.stx_btime.tv_sec;
   return 0;
@@ -87,7 +89,7 @@ static char *make_slug(const char *title) {
   return slug;
 }
 
-void *getDimensions(const char *image, unsigned char **thumb_buf, size_t *thumb_size) {
+void *magic(const char *image) {
 #define ThrowWandException(wand) \
 { \
   char \
@@ -99,13 +101,37 @@ void *getDimensions(const char *image, unsigned char **thumb_buf, size_t *thumb_
   description=MagickGetException(wand,&severity); \
   (void) fprintf(stderr,"%s %s %lu %s\n",GetMagickModule(),description); \
   description=(char *) MagickRelinquishMemory(description); \
+  free(imageDims); \
   magick_wand=DestroyMagickWand(magick_wand); \
   MagickWandTerminus(); \
   exit(0); \
   }
+size_t thumbnail_size = strlen(image) + strlen("/.thumbnails/") + 1;
+char *thumbnail = malloc(thumbnail_size);
+char *temp_path = strdup(image);
+MagicResult *imageDims = malloc(sizeof(MagicResult));
 
-ImageDims *imageDims = malloc(sizeof(ImageDims));
-  
+if (!thumbnail || !temp_path || !imageDims) {
+    exit(1);
+}
+char *dir = dirname(temp_path);
+
+size_t thumbnail_dir_size = strlen(dir) + strlen("/.thumbnails/") + 1;
+char *thumbnail_dir = malloc(thumbnail_dir_size);
+sprintf(thumbnail_dir, "%s/.thumbnails", dir);
+struct stat st = {0};
+if (stat(thumbnail_dir, &st) == -1) {
+    mkdir(thumbnail_dir, 0750);
+}
+free(thumbnail_dir);
+
+const char *base = strrchr(image, '/');
+base = (base) ? base + 1 : image;
+
+snprintf(thumbnail, thumbnail_size, "%s/.thumbnails/%s", dir, base);
+free(temp_path);
+imageDims->thumb_path = thumbnail;
+
 MagickWand
 *magick_wand;
 
@@ -134,20 +160,10 @@ MagickResetIterator(magick_wand);
 while (MagickNextImage(magick_wand) != MagickFalse)
   MagickResizeImage(magick_wand,640,360,LanczosFilter);
 
-size_t blob_len;
 MagickSetImageFormat(magick_wand, "JPEG");
-unsigned char *blob = MagickGetImagesBlob(magick_wand, &blob_len);
-if (!blob)
+status=MagickWriteImages(magick_wand,thumbnail,MagickTrue);
+if (status == MagickFalse)
   ThrowWandException(magick_wand);
-
-*thumb_buf = malloc(blob_len);
-if (!*thumb_buf) {
-  MagickRelinquishMemory(blob);
-  ThrowWandException(magick_wand);
-}
-memcpy(*thumb_buf, blob, blob_len);
-*thumb_size = blob_len;
-MagickRelinquishMemory(blob);
 
 magick_wand=DestroyMagickWand(magick_wand);
 MagickWandTerminus();
@@ -160,10 +176,21 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Usage: %s image\n", argv[0]);
     return 1;
   }
+  
+  char *base = strrchr(argv[1], '/');
+  base = (base) ? base + 1 : argv[1];
 
-  unsigned char *thumb_buf = NULL;
-  size_t thumb_size = 0;
-  ImageDims *imageDims = (ImageDims *)getDimensions(argv[1], &thumb_buf, &thumb_size);
+  char filename[strlen(argv[1]) + 1];
+  strcpy(filename, base);
+
+  // Resolve absolute path
+  char *abs_image_path = realpath(argv[1], NULL);
+  if (!abs_image_path) {
+    perror("realpath");
+    return 1;
+  }
+
+  MagicResult *imageDims = (MagicResult *)magic(abs_image_path);
 
   char *pgpass = NULL, *pguser = NULL, *pgdbname = NULL;
   char mime_type_buf[32];
@@ -362,16 +389,10 @@ int main(int argc, char **argv) {
   snprintf(height_str, sizeof(height_str), "%zu", imageDims->height);
 
   const char *paramValues[12] = {
-    title, slug, (const char *)img_buf, (const char *)thumb_buf,
+    title, slug, abs_image_path, imageDims->thumb_path,
     mime_type, file_size_str, width_str, height_str,
     hex, embedding_str, created_str, updated_str
   };
-  int paramLengths[12] = {
-    0, 0, (int)res, (int)thumb_size,
-    0, 0, 0, 0,
-    0, 0, 0, 0
-  };
-  int paramFormats[12] = {0,0,1,1,0,0,0,0,0,0,0,0};
 
   const char *insert_sql =
     "INSERT INTO wallpapers (title, slug, image, thumbnail, mime_type, "
@@ -379,23 +400,24 @@ int main(int argc, char **argv) {
     "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::vector,$11,$12)";
 
   PGresult *res_insert = PQexecParams(conn, insert_sql, 12, NULL,
-                                      paramValues, paramLengths, paramFormats, 0);
+                                      paramValues, NULL, NULL, 0);
   if (PQresultStatus(res_insert) != PGRES_COMMAND_OK) {
-    fprintf(stderr, "Insert failed for %s: %s\n", argv[1], PQresultErrorMessage(res_insert));
+    fprintf(stderr, "Insert failed for %s: %s\n", abs_image_path, PQresultErrorMessage(res_insert));
   }
   PQclear(res_insert);
 
   PQfinish(conn);
 
   // Cleanup
+  free(abs_image_path);
   free(img_buf);
+
   clip_free(ctx);
   clip_image_u8_free(img0);
   clip_image_f32_free(img_res);
   fclose(f);
   free(imageDims);
   free(embedding_str);
-  free(thumb_buf);
   free(slug);
   magic_close(mime);
   return 0;
