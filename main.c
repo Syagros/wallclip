@@ -22,7 +22,7 @@ typedef struct {
   size_t width;
   size_t height;
   char *thumb_path;
-} MagicResult;
+} MagicResults;
 
 int get_birthtime_linux(const char *path, time_t *created_at) {
   struct statx stx;
@@ -101,7 +101,7 @@ void *magic(const char *image) {
   description=MagickGetException(wand,&severity); \
   (void) fprintf(stderr,"%s %s %lu %s\n",GetMagickModule(),description); \
   description=(char *) MagickRelinquishMemory(description); \
-  free(imageDims); \
+  free(image_results); \
   magick_wand=DestroyMagickWand(magick_wand); \
   MagickWandTerminus(); \
   exit(0); \
@@ -109,9 +109,9 @@ void *magic(const char *image) {
 size_t thumbnail_size = strlen(image) + strlen("/.thumbnails/") + 1;
 char *thumbnail = malloc(thumbnail_size);
 char *temp_path = strdup(image);
-MagicResult *imageDims = malloc(sizeof(MagicResult));
+MagicResults *image_results = malloc(sizeof(MagicResults));
 
-if (!thumbnail || !temp_path || !imageDims) {
+if (!thumbnail || !temp_path || !image_results) {
     exit(1);
 }
 char *dir = dirname(temp_path);
@@ -130,7 +130,7 @@ base = (base) ? base + 1 : image;
 
 snprintf(thumbnail, thumbnail_size, "%s/.thumbnails/%s", dir, base);
 free(temp_path);
-imageDims->thumb_path = thumbnail;
+image_results->thumb_path = thumbnail;
 
 MagickWand
 *magick_wand;
@@ -151,8 +151,8 @@ status=MagickReadImage(magick_wand,image);
 if (status == MagickFalse)
   ThrowWandException(magick_wand);
 
-imageDims->width = MagickGetImageWidth(magick_wand);
-imageDims->height = MagickGetImageHeight(magick_wand);
+image_results->width = MagickGetImageWidth(magick_wand);
+image_results->height = MagickGetImageHeight(magick_wand);
 
 // Generate the images into a thumbnail.
 MagickResetIterator(magick_wand);
@@ -168,7 +168,7 @@ if (status == MagickFalse)
 magick_wand=DestroyMagickWand(magick_wand);
 MagickWandTerminus();
 
-return (void *)imageDims;
+return (void *)image_results;
 }
 
 int main(int argc, char **argv) {
@@ -190,7 +190,7 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  MagicResult *imageDims = (MagicResult *)magic(abs_image_path);
+  MagicResults *image_results = (MagicResults *)magic(abs_image_path);
 
   char *pgpass = NULL, *pguser = NULL, *pgdbname = NULL;
   char mime_type_buf[32];
@@ -385,11 +385,11 @@ int main(int argc, char **argv) {
 
   char file_size_str[32], width_str[16], height_str[16];
   snprintf(file_size_str, sizeof(file_size_str), "%zu", res);
-  snprintf(width_str, sizeof(width_str), "%zu", imageDims->width);
-  snprintf(height_str, sizeof(height_str), "%zu", imageDims->height);
+  snprintf(width_str, sizeof(width_str), "%zu", image_results->width);
+  snprintf(height_str, sizeof(height_str), "%zu", image_results->height);
 
   const char *paramValues[12] = {
-    title, slug, abs_image_path, imageDims->thumb_path,
+    title, slug, abs_image_path, image_results->thumb_path,
     mime_type, file_size_str, width_str, height_str,
     hex, embedding_str, created_str, updated_str
   };
@@ -416,7 +416,7 @@ int main(int argc, char **argv) {
   clip_image_u8_free(img0);
   clip_image_f32_free(img_res);
   fclose(f);
-  free(imageDims);
+  free(image_results);
   free(embedding_str);
   free(slug);
   magic_close(mime);
