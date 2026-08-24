@@ -19,10 +19,8 @@ CLOSED: [2026-08-24 Mon 05:02]
 :LOGBOOK:
 - State "DONE"       from "TODO"       [2026-08-24 Mon 05:02]
 :END:
-* DOING loop & queue for bulk processing
-:LOGBOOK:
-- State "DOING"      from "TODO"       [2026-08-24 Mon 05:02]
-:END:
+* TODO checksum and check for duplicate earlier to avoid useless processing
+* TODO loop & queue for bulk processing
 * TODO test querying
 * TODO refactor everything (or v2, idk)
 * TODO njs
