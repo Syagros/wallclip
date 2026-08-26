@@ -176,12 +176,6 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Usage: %s image\n", argv[0]);
     return 1;
   }
-  
-  char *base = strrchr(argv[1], '/');
-  base = (base) ? base + 1 : argv[1];
-
-  char filename[strlen(argv[1]) + 1];
-  strcpy(filename, base);
 
   // Resolve absolute path
   char *abs_image_path = realpath(argv[1], NULL);
@@ -189,6 +183,19 @@ int main(int argc, char **argv) {
     perror("realpath");
     return 1;
   }
+
+  char *abs_image_path_copy = strdup(abs_image_path);
+  if (!abs_image_path_copy) {
+    perror("strdup");
+    free(abs_image_path);
+    return 1;
+  }
+  
+  char *base = strrchr(abs_image_path, '/');
+  base = (base) ? base + 1 : abs_image_path;
+
+  char filename[strlen(abs_image_path) + 1];
+  strcpy(filename, base);
 
   MagicResults *image_results = (MagicResults *)magic(abs_image_path);
 
@@ -200,7 +207,7 @@ int main(int argc, char **argv) {
     perror("fopen .env");
     return 1;
   }
-  FILE *f = fopen(argv[1], "rb");
+  FILE *f = fopen(abs_image_path, "rb");
   if (!f) {
     perror("fopen");
     return 1;
@@ -252,8 +259,8 @@ int main(int argc, char **argv) {
 
   // Load image from disk
   struct clip_image_u8 * img0 = clip_image_u8_make();
-  if (!clip_image_load_from_file(argv[1], img0)) {
-	fprintf(stderr, "%s: failed to load image from '%s'\n", __func__, argv[1]);        clip_image_u8_free(img0);
+  if (!clip_image_load_from_file(abs_image_path, img0)) {
+	fprintf(stderr, "%s: failed to load image from '%s'\n", __func__, abs_image_path);        clip_image_u8_free(img0);
 	return 1;
   }
 
@@ -284,12 +291,12 @@ int main(int argc, char **argv) {
   sprintf(ep, "]");
 
   time_t created_at, modified_at, changed_at, accessed_at;
-  if (get_file_times(argv[1], &modified_at, &changed_at, &accessed_at) != 0) {
+  if (get_file_times(abs_image_path, &modified_at, &changed_at, &accessed_at) != 0) {
     perror("get_file_times");
     return 1;
   }
 
-  if (get_birthtime_linux(argv[1], &created_at) != 0) {
+  if (get_birthtime_linux(abs_image_path, &created_at) != 0) {
     perror("get_birthtime_linux");
     created_at = 0;
   }
@@ -334,11 +341,11 @@ int main(int argc, char **argv) {
 
   magic_t mime = magic_open(MAGIC_MIME_TYPE);
   magic_load(mime,NULL);
-  const char *mime_type = magic_file(mime,argv[1]);
+  const char *mime_type = magic_file(mime,abs_image_path);
 
   format_bytes(res, mime_type_buf, sizeof(mime_type_buf));
 
-  char *title = basename(argv[1]);
+  char *title = basename(abs_image_path_copy);
   char *dot = strrchr(title, '.');
   if (dot && dot != title ) {
     *dot = '\0';
