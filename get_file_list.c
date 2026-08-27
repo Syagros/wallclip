@@ -31,29 +31,29 @@ int main(int argc, char *argv[])
     if (stat(argv[i], &st) != 0) {
       Errnof(E_FAIL, "%s: does not exist", argv[i]);
       exit(EXIT_FAILURE);
-      if (S_ISREG(st.st_mode) && st.st_size == 0) {
-        Errnof(E_FAIL, "%s: empty file", argv[i]);
+    }
+    if (S_ISREG(st.st_mode) && st.st_size == 0) {
+      Errnof(E_FAIL, "%s: empty file", argv[i]);
+      exit(EXIT_FAILURE);
+    }
+
+    if (S_ISDIR(st.st_mode)) {
+      DIR *dir = opendir(argv[i]);
+
+      if (!dir) {
+        Errnof(E_FAIL, "%s: cannot open directory", argv[i]);
         exit(EXIT_FAILURE);
       }
 
-      if (S_ISDIR(st.st_mode)) {
-        DIR *dir = opendir(argv[i]);
-
-        if (!dir) {
-          Errnof(E_FAIL, "%s: cannot open directory", argv[i]);
-          exit(EXIT_FAILURE);
-        }
-
-        int count = 0;
-        struct dirent *entry;
-        while ((entry = readdir(dir)) != NULL) {
-          if (++count > 2) break; // more than "." and ".."
-        }
-        closedir(dir);
-        if (count <= 2) {
-          Errnof(E_FAIL, "%s: empty directory", argv[i]);
-          exit(EXIT_FAILURE);
-        }
+      int count = 0;
+      struct dirent *entry;
+      while ((entry = readdir(dir)) != NULL) {
+        if (++count > 2) break; // more than "." and ".."
+      }
+      closedir(dir);
+      if (count <= 2) {
+        Errnof(E_FAIL, "%s: empty directory", argv[i]);
+        exit(EXIT_FAILURE);
       }
     }
   }
