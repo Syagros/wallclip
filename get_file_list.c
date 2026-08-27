@@ -45,17 +45,21 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
       }
 
-      int count = 0;
       struct dirent *entry;
+      int has_entry = 0;
       while ((entry = readdir(dir)) != NULL) {
-        if (++count > 2) break; // more than "." and ".."
+        if (strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0) {
+          has_entry = 1;
+          break;
+        }
       }
       closedir(dir);
-      if (count <= 2) {
+      if (!has_entry) {
         Errnof(E_FAIL, "%s: empty directory", argv[i]);
         exit(EXIT_FAILURE);
       }
     }
   }
+  
   return 0;
 }
