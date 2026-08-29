@@ -16,7 +16,7 @@ $(TARGET): $(SRC)
 	$(CC) $(CFLAGS) -o $(TARGET) $(SRC) $(LDFLAGS)
 
 debug: $(SRC)
-	$(CC) $(CFLAGS) $(DEBUG_FLAGS) -o $(TARGET)_debug $(SRC) $(LDFLAGS)
+	$(CC) $(CFLAGS) $(DEBUG_FLAGS) -o $(TARGET) $(SRC) $(LDFLAGS)
 
 clean:
-	rm -f $(TARGET) $(TARGET)_debug
+	rm -f $(TARGET)
