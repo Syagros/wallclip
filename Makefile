@@ -10,9 +10,9 @@ SRC = wallclip.c
 
 .PHONY: all debug clean
 
-all: $(TARGET)
+all: clean compile
 
-$(TARGET): $(SRC)
+compile: $(SRC)
 	$(CC) $(CFLAGS) -o $(TARGET) $(SRC) $(LDFLAGS)
 
 debug: $(SRC)

@@ -8,6 +8,10 @@ CLOSED: [2026-08-30 Sun 11:29]
 :LOGBOOK:
 - State "DONE"       from "TODO"       [2026-08-30 Sun 11:29]
 :END:
-* TODO retry option for the failed images
+* DONE retry option for the failed images
+CLOSED: [2026-08-30 Sun 12:25]
+:LOGBOOK:
+- State "DONE"       from "TODO"       [2026-08-30 Sun 12:25]
+:END:
 * TODO save absolute path in database
 * TODO thread pool

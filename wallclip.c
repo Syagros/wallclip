@@ -110,31 +110,34 @@ int process_img(image_ctx_t *img) {
 
   {
     // deduplication check
-      const char *paramValues[1] = { hex };
-      PGresult *res = PQexecParams(
-                                   img->conn,
-                                   "SELECT 1 FROM wallpapers WHERE checksum = $1 LIMIT 1",
-                                   1,            // nParams
-                                   NULL,         // paramTypes (let server infer)
-                                   paramValues,
-                                   NULL,         // paramLengths (text params, ignored)
-                                   NULL,         // paramFormats (text)
-                                   0);           // resultFormat: text
+    const char *paramValues[1] = { hex };
+    PGresult *res = PQexecParams(
+                                 img->conn,
+                                 "SELECT 1 FROM wallpapers WHERE checksum = $1 LIMIT 1",
+                                 1,            // nParams
+                                 NULL,         // paramTypes (let server infer)
+                                 paramValues,
+                                 NULL,         // paramLengths (text params, ignored)
+                                 NULL,         // paramFormats (text)
+                                 0);           // resultFormat: text
 
-      if (PQresultStatus(res) != PGRES_TUPLES_OK) {
-        Errorf(E_FAIL, "checksum query failed: %s", PQerrorMessage(img->conn));
-        free(mime_type);
-        PQclear(res);
-        return -1;
-      }
-
-      int found = PQntuples(res) > 0;
+    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+      Errorf(E_FAIL, "checksum query failed: %s", PQerrorMessage(img->conn));
+      free(mime_type);
       PQclear(res);
-      if (found)
-        { Errorf(E_WARN, "checksum of %s found in database, skipping as a duplicate.", img->path);
-          free(mime_type);
-          return -1;
-        }
+      return -1;
+    }
+
+    int found = PQntuples(res) > 0;
+    PQclear(res);
+    if (found)
+      { Errorf(E_WARN, "checksum of %s found in database, skipping as a duplicate.", img->path);
+#if !defined(DEBUG)
+        fprintf(stderr, "skipping '%s': duplicate (checksum already in database)\n", img->path);
+#endif
+        free(mime_type);
+        return 1;
+      }
   }
   
   int vec_dim = clip_get_vision_hparams(img->clip_ctx)->projection_dim;
@@ -297,7 +300,7 @@ int process_img(image_ctx_t *img) {
         free(temp_path);
         free(embedding_str);
         free(mime_type);
-       return -1;
+        return -1;
       }
     }
     free(thumbnail_dir);
@@ -391,7 +394,21 @@ int process_img(image_ctx_t *img) {
     PGresult *check_res = PQexecParams(img->conn, check_sql, 1, NULL,
                                        check_params, NULL, NULL, 0);
 
-    if (PQresultStatus(check_res) == PGRES_TUPLES_OK && PQntuples(check_res) > 0) {
+    if (PQresultStatus(check_res) != PGRES_TUPLES_OK) {
+      Errorf(E_FAIL, "slug collision query failed for '%s': %s", img->path, PQerrorMessage(img->conn));
+#if !defined(DEBUG)
+      fprintf(stderr, "wallclip: slug collision query failed for '%s': %s", img->path, PQerrorMessage(img->conn));
+#endif
+      PQclear(check_res);
+      free(slug);
+      free(title);
+      free(mime_type);
+      free(thumbnail);
+      free(embedding_str);
+      return -1;
+    }
+
+    if (PQntuples(check_res) > 0) {
       int max_n = 0;
       size_t base_len = strlen(slug);
       for (int i = 0; i < PQntuples(check_res); i++) {
@@ -410,6 +427,16 @@ int process_img(image_ctx_t *img) {
       }
       if (max_n > 0) {
         char *new_slug = malloc(base_len + 16);
+        if (!new_slug) {
+          Errnof(E_CRIT, "malloc failed building unique slug");
+          PQclear(check_res);
+          free(slug);
+          free(title);
+          free(mime_type);
+          free(thumbnail);
+          free(embedding_str);
+          return -1;
+        }
         sprintf(new_slug, "%s-%d", slug, max_n);
         free(slug);
         slug = new_slug;
@@ -506,6 +533,9 @@ int main(int argc, char *argv[])
   for (int i = 1; i < argc; i++) {
     if (argv[i][0] == '-') {
       Errorf(E_FAIL, "unknown option: %s", argv[i]);
+#if !defined(DEBUG)
+      fprintf(stderr, "wallclip: unknown option: %s\n", argv[i]);
+#endif
       file_list_free(list);
       exit(EXIT_FAILURE);
     }
@@ -513,16 +543,25 @@ int main(int argc, char *argv[])
     struct stat st;
     if (stat(argv[i], &st) != 0) {
       Errnof(E_FAIL, "%s: does not exist", argv[i]);
+#if !defined(DEBUG)
+      fprintf(stderr, "wallclip: %s: %s\n", argv[i], strerror(errno));
+#endif
       file_list_free(list);
       exit(EXIT_FAILURE);
     }
     if (S_ISREG(st.st_mode) && st.st_size == 0) {
       Errnof(E_FAIL, "%s: empty file", argv[i]);
+#if !defined(DEBUG)
+      fprintf(stderr, "wallclip: %s: empty file\n", argv[i]);
+#endif
       file_list_free(list);
       exit(EXIT_FAILURE);
     }
     if (S_ISDIR(st.st_mode)) {
       Errnof(E_FAIL, "%s: cannot open directory", argv[i]);
+#if !defined(DEBUG)
+      fprintf(stderr, "wallclip: %s: cannot open directory\n", argv[i]);
+#endif
       file_list_free(list);
       exit(EXIT_FAILURE);
     }
@@ -539,6 +578,9 @@ int main(int argc, char *argv[])
   char line[512];
   if (!envf) {
     Errorf(E_CRIT, "Failed to open .env file.");
+#if !defined(DEBUG)
+    fprintf(stderr, "wallclip: failed to open .env file: %s\n", strerror(errno));
+#endif
     exit(EXIT_FAILURE);
   }
 
@@ -567,6 +609,9 @@ int main(int argc, char *argv[])
   fclose(envf);
   if (!pgpass || !pguser || !pgdbname) {
     Errorf(E_FAIL, "PGPASS/PGUSER/PGDBNAME missing from .env");
+#if !defined(DEBUG)
+    fprintf(stderr, "wallclip: PGPASS/PGUSER/PGDBNAME missing from .env\n");
+#endif
     free(pgpass);
     free(pguser);
     free(pgdbname);
@@ -574,9 +619,12 @@ int main(int argc, char *argv[])
   }
 
   // Load CLIP model
-  struct clip_ctx *ctx = clip_model_load("/usr/local/src/clip.cpp/models/clip-vit-base-patch32_ggml-model-f32.gguf", 1);
+  struct clip_ctx *ctx = clip_model_load("/usr/local/src/clip.cpp/models/clip-vit-base-patch32_ggml-model-f32.gguf", 0);
   if (!ctx) {
     Errorf(E_FAIL, "Unable to load model from %s", "/usr/local/src/clip.cpp/models/clip-vit-base-patch32_ggml-model-f32.gguf");
+#if !defined(DEBUG)
+    fprintf(stderr, "wallclip: unable to load model from %s\n", "/usr/local/src/clip.cpp/models/clip-vit-base-patch32_ggml-model-f32.gguf");
+#endif
 	exit(EXIT_FAILURE);
   }
 
@@ -589,15 +637,20 @@ int main(int argc, char *argv[])
   free(pgdbname);
   if (PQstatus(conn) == CONNECTION_BAD) {       
     Errorf(E_FAIL, "Connection to database failed: %s", PQerrorMessage(conn));
+#if !defined(DEBUG)
+    fprintf(stderr, "wallclip: connection to database failed: %s", PQerrorMessage(conn));
+#endif
     PQfinish(conn);
     clip_free(ctx);
     file_list_free(list);
     exit(EXIT_FAILURE);
   }
+#if defined(DEBUG)
   else {
     int ver = PQserverVersion(conn);
     printf("Server version: %d\n", ver);
   }
+#endif
 
   MagickWandGenesis();
   file_list_t *failed = malloc(sizeof(*failed));
@@ -630,7 +683,8 @@ int main(int argc, char *argv[])
       .conn     = conn,    /* from PQconnectdb(...) */
     };
 
-    if (process_img(&img) != 0) {
+    int rc = process_img(&img);
+    if (rc < 0) {
       Errnof(E_FAIL, "failed to process image '%s'", img.path);
       list->had_errors = 1;
       if (file_list_push(failed, img.path) != 0) {
@@ -639,19 +693,68 @@ int main(int argc, char *argv[])
       continue;
     }
   }
+
+  while (failed->count > 0) {
+    Errorf(E_WARN, "failed to process %d file%s:",
+           failed->count, failed->count == 1 ? "" : "s");
+#if !defined(DEBUG)
+    fprintf(stderr, "failed to process %d file%s:\n",
+            failed->count, failed->count == 1 ? "" : "s");
+#endif
+    for (int i = 0; i < failed->count; i++) {
+      Errorf(E_WARN, "  %s", failed->paths[i]);
+#if !defined(DEBUG)
+      fprintf(stderr, "  %s\n", failed->paths[i]);
+#endif
+    }
+    printf("Retry failed images? [Y/n] ");
+    fflush(stdout);
+    char prompt[16];
+    int retry_yes = 1; // default yes
+    if (fgets(prompt, sizeof(prompt), stdin)) {
+      size_t prompt_len = strcspn(prompt, "\r\n");
+      prompt[prompt_len] = '\0';
+      if (prompt_len > 0 && (prompt[0] == 'n' || prompt[0] == 'N'))
+        retry_yes = 0;
+    }
+    if (!retry_yes)
+      break;
+    file_list_t *retry = malloc(sizeof(*retry));
+    if (!retry) {
+      Errnof(E_FAIL, "malloc failed");
+      break;
+    }
+    retry->capacity = failed->capacity;
+    retry->count = 0;
+    retry->had_errors = 0;
+    retry->paths = reallocarray(NULL, retry->capacity, sizeof(*retry->paths));
+    if (!retry->paths) {
+      Errnof(E_FAIL, "reallocarray failed");
+      free(retry);
+      break;
+    }
+    for (int i = 0; i < failed->count; i++) {
+      image_ctx_t img = {
+        .path     = failed->paths[i],
+        .clip_ctx = ctx,
+        .conn     = conn,
+      };
+      int rc = process_img(&img);
+      if (rc < 0) {
+        Errnof(E_FAIL, "failed to process image '%s'", img.path);
+        if (file_list_push(retry, img.path) != 0) {
+          Errorf(E_FAIL, "failed to record '%s' in failed-files list", img.path);
+        }
+      }
+    }
+    file_list_free(failed);
+    failed = retry;
+  }
+
   MagickWandTerminus();
   clip_free(ctx);
   PQfinish(conn);
-
-  if (failed->count > 0) {
-    fprintf(stderr, "Failed to process %d file%s:\n",
-            failed->count, failed->count == 1 ? "" : "s");
-    for (int i = 0; i < failed->count; i++) {
-      fprintf(stderr, "  %s\n", failed->paths[i]);
-    }
-  }
-
-  int had_errors = list->had_errors;
+  int had_errors = list->had_errors && failed->count > 0;
   file_list_free(failed);
   file_list_free(list);
   return had_errors ? EXIT_FAILURE : EXIT_SUCCESS;
