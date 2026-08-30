@@ -13,5 +13,9 @@ CLOSED: [2026-08-30 Sun 12:25]
 :LOGBOOK:
 - State "DONE"       from "TODO"       [2026-08-30 Sun 12:25]
 :END:
-* TODO save absolute path in database
+* DONE save absolute path in database
+CLOSED: [2026-08-30 Sun 12:59]
+:LOGBOOK:
+- State "DONE"       from "TODO"       [2026-08-30 Sun 12:59]
+:END:
 * TODO thread pool

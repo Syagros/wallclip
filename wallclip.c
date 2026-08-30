@@ -24,7 +24,6 @@ typedef struct {
   char **paths;
   int count;
   int capacity;
-  int had_errors;
 } file_list_t;
 
 typedef struct {
@@ -521,7 +520,6 @@ int main(int argc, char *argv[])
   }
   list->capacity = 16;
   list->count = 0;
-  list->had_errors = 0;
   list->paths = reallocarray(NULL, list->capacity, sizeof(*list->paths));
   if (!list->paths) {
     Errnof(E_FAIL, "reallocarray failed");
@@ -566,10 +564,24 @@ int main(int argc, char *argv[])
       exit(EXIT_FAILURE);
     }
 
-    // push list
-    if (file_list_push(list, argv[i]) != 0) {
-      list->had_errors = 1;
+    // get absolute path
+    char *abs_path = realpath(argv[i], NULL);
+    if (!abs_path) {
+      Errnof(E_FAIL, "realpath failed for '%s'", argv[i]);
+#if !defined(DEBUG)
+      fprintf(stderr, "wallclip: %s: %s\n", argv[i], strerror(errno));
+#endif
+      file_list_free(list);
+      exit(EXIT_FAILURE);
     }
+
+    // push list
+    if (file_list_push(list, abs_path) != 0) {
+      free(abs_path);
+      file_list_free(list);
+      exit(EXIT_FAILURE);
+    }
+    free(abs_path);
   }
 
   // Postgresql creds parsing from .env file
@@ -664,7 +676,6 @@ int main(int argc, char *argv[])
   }
   failed->capacity = 16;
   failed->count = 0;
-  failed->had_errors = 0;
   failed->paths = reallocarray(NULL, failed->capacity, sizeof(*failed->paths));
   if (!failed->paths) {
     Errnof(E_FAIL, "reallocarray failed");
@@ -686,7 +697,6 @@ int main(int argc, char *argv[])
     int rc = process_img(&img);
     if (rc < 0) {
       Errnof(E_FAIL, "failed to process image '%s'", img.path);
-      list->had_errors = 1;
       if (file_list_push(failed, img.path) != 0) {
         Errorf(E_FAIL, "failed to record '%s' in failed-files list", img.path);
       }
@@ -726,7 +736,6 @@ int main(int argc, char *argv[])
     }
     retry->capacity = failed->capacity;
     retry->count = 0;
-    retry->had_errors = 0;
     retry->paths = reallocarray(NULL, retry->capacity, sizeof(*retry->paths));
     if (!retry->paths) {
       Errnof(E_FAIL, "reallocarray failed");
@@ -754,8 +763,8 @@ int main(int argc, char *argv[])
   MagickWandTerminus();
   clip_free(ctx);
   PQfinish(conn);
-  int had_errors = list->had_errors && failed->count > 0;
+  return_status = failed->count > 0;
   file_list_free(failed);
   file_list_free(list);
-  return had_errors ? EXIT_FAILURE : EXIT_SUCCESS;
+  return return_status ? EXIT_FAILURE : EXIT_SUCCESS;
 }
