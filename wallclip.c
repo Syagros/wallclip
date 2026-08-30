@@ -763,7 +763,7 @@ int main(int argc, char *argv[])
   MagickWandTerminus();
   clip_free(ctx);
   PQfinish(conn);
-  return_status = failed->count > 0;
+  int return_status = failed->count > 0;
   file_list_free(failed);
   file_list_free(list);
   return return_status ? EXIT_FAILURE : EXIT_SUCCESS;
