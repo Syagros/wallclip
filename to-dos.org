@@ -1,0 +1,8 @@
+* DONE Generate checksums first in process_img()
+CLOSED: [2026-08-30 Sun 11:06]
+:LOGBOOK:
+- State "DONE"       from "TODO"       [2026-08-30 Sun 11:06]
+:END:
+* TODO duplication check before rest of the process_img()
+* TODO retry option for the failed images
+* TODO thread pool

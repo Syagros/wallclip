@@ -34,6 +34,80 @@ typedef struct {
 } image_ctx_t;
 
 int process_img(image_ctx_t *img) {
+  // checksum + mime type
+  char hex[65];
+  size_t fsize;
+  char *mime_type;
+  {
+    FILE *f = fopen(img->path, "rb");
+    if (!f) {
+      Errnof(E_FAIL, "fopen failed for '%s'", img->path);
+      return -1;
+    }
+
+    if (fseek(f, 0L, SEEK_END) != 0) {
+      Errnof(E_FAIL, "fseek (end) failed for '%s'", img->path);
+      fclose(f);
+      return -1;
+    }
+
+    long fsize_l = ftell(f);
+    if (fsize_l < 0) {
+      Errnof(E_FAIL, "ftell failed for '%s'", img->path);
+      fclose(f);
+      return -1;
+    }
+    fsize = (size_t)fsize_l;
+
+    if (fseek(f, 0L, SEEK_SET) != 0) {
+      Errnof(E_FAIL, "fseek (start) failed for '%s'", img->path);
+      fclose(f);
+      return -1;
+    }
+
+    unsigned char *img_buf = malloc(fsize);
+    if (!img_buf || fread(img_buf, 1, fsize, f) != fsize) {
+      Errorf(E_FAIL, "failed to read '%s'", img->path);
+      free(img_buf);
+      fclose(f);
+      return -1;
+    }
+    fclose(f);
+
+    unsigned char md[32];
+    unsigned int md_len;
+    EVP_Digest(img_buf, fsize, md, &md_len, EVP_sha256(), NULL);
+    for (unsigned int i = 0; i < md_len; i++)
+      sprintf(hex + i * 2, "%02x", md[i]);
+    hex[64] = '\0';
+    free(img_buf);
+
+    magic_t mime = magic_open(MAGIC_MIME_TYPE);
+    if (!mime) {
+      Errorf(E_FAIL, "magic_open failed for '%s'", img->path);
+      return -1;
+    }
+    if (magic_load(mime, NULL) != 0) {
+      Errorf(E_FAIL, "magic_load failed for '%s': %s", img->path, magic_error(mime));
+      magic_close(mime);
+      return -1;
+    }
+    const char *mime_result = magic_file(mime, img->path);
+    if (!mime_result) {
+      Errorf(E_FAIL, "magic_file failed for '%s': %s", img->path, magic_error(mime));
+      magic_close(mime);
+      return -1;
+    }
+    // magic_file's return value is owned by the magic_t handle and becomes
+    // invalid once it is closed, so make our own copy before closing.
+    mime_type = strdup(mime_result);
+    magic_close(mime);
+    if (!mime_type) {
+      Errnof(E_CRIT, "strdup failed for mime_type");
+      return -1;
+    }
+  }
+
   int vec_dim = clip_get_vision_hparams(img->clip_ctx)->projection_dim;
 
   // Load image from disk
@@ -41,6 +115,7 @@ int process_img(image_ctx_t *img) {
   if (!clip_image_load_from_file(img->path, img0)) {
     Errnof(E_FAIL, "failed to load image from '%s'", img->path);
     clip_image_u8_free(img0);
+    free(mime_type);
     return -1;
   }
   // Preprocess image
@@ -49,6 +124,7 @@ int process_img(image_ctx_t *img) {
     Errorf(E_FAIL, "failed to preprocess image '%s'", img->path);
     clip_image_f32_free(img_res);
     clip_image_u8_free(img0);
+    free(mime_type);
     return -1;
   }
   // Encode image
@@ -57,6 +133,7 @@ int process_img(image_ctx_t *img) {
     Errorf(E_FAIL, "failed to encode image '%s'", img->path);
     clip_image_u8_free(img0);
     clip_image_f32_free(img_res);
+    free(mime_type);
     return -1;
   }
   clip_image_u8_free(img0);
@@ -66,6 +143,7 @@ int process_img(image_ctx_t *img) {
   char *embedding_str = malloc(cap);
   if (!embedding_str) {
     Errnof(E_CRIT, "malloc failed for embedding_str (%d dims)", vec_dim);
+    free(mime_type);
     return -1;
   }
 
@@ -79,6 +157,7 @@ int process_img(image_ctx_t *img) {
     if (n < 0 || (size_t)n >= cap - used) {
       Errorf(E_CRIT, "embedding string truncated/overflowed for '%s'", img->path);
       free(embedding_str);
+      free(mime_type);
       return -1;
     }
     used += n;
@@ -93,6 +172,7 @@ int process_img(image_ctx_t *img) {
     if (stat(img->path, &st) != 0) {
       Errorf(E_FAIL, "stat failed for '%s'", img->path);
       free(embedding_str);
+      free(mime_type);
       return -1;
     }
     modified_at = st.st_mtime;
@@ -132,6 +212,7 @@ int process_img(image_ctx_t *img) {
     if (!temp_path) {
       Errnof(E_CRIT, "strdup failed building thumbnail path");
       free(embedding_str);
+      free(mime_type);
       return -1;
     }
     char *dir = dirname(temp_path);
@@ -147,6 +228,7 @@ int process_img(image_ctx_t *img) {
       Errnof(E_CRIT, "strdup failed building thumbnail path");
       free(temp_path);
       free(embedding_str);
+      free(mime_type);
       return -1;
     }
     char *base_ext = strrchr(base_noext, '.');
@@ -159,6 +241,7 @@ int process_img(image_ctx_t *img) {
       free(base_noext);
       free(temp_path);
       free(embedding_str);
+      free(mime_type);
       return -1;
     }
 
@@ -170,6 +253,7 @@ int process_img(image_ctx_t *img) {
       free(base_noext);
       free(temp_path);
       free(embedding_str);
+      free(mime_type);
       return -1;
     }
     snprintf(thumbnail_dir, thumbnail_dir_size, "%s/.thumbnails", dir);
@@ -183,7 +267,8 @@ int process_img(image_ctx_t *img) {
         free(base_noext);
         free(temp_path);
         free(embedding_str);
-        return -1;
+        free(mime_type);
+       return -1;
       }
     }
     free(thumbnail_dir);
@@ -198,6 +283,7 @@ int process_img(image_ctx_t *img) {
       magick_wand = DestroyMagickWand(magick_wand);
       free(thumbnail);
       free(embedding_str);
+      free(mime_type);
       return -1;
     }
 
@@ -214,101 +300,10 @@ int process_img(image_ctx_t *img) {
       magick_wand = DestroyMagickWand(magick_wand);
       free(thumbnail);
       free(embedding_str);
+      free(mime_type);
       return -1;
     }
     magick_wand = DestroyMagickWand(magick_wand);
-  }
-
-  // checksum + mime type
-  char hex[65];
-  size_t fsize;
-  char *mime_type;
-  {
-    FILE *f = fopen(img->path, "rb");
-    if (!f) {
-      Errnof(E_FAIL, "fopen failed for '%s'", img->path);
-      free(thumbnail);
-      free(embedding_str);
-      return -1;
-    }
-
-    if (fseek(f, 0L, SEEK_END) != 0) {
-      Errnof(E_FAIL, "fseek (end) failed for '%s'", img->path);
-      fclose(f);
-      free(thumbnail);
-      free(embedding_str);
-      return -1;
-    }
-
-    long fsize_l = ftell(f);
-    if (fsize_l < 0) {
-      Errnof(E_FAIL, "ftell failed for '%s'", img->path);
-      fclose(f);
-      free(thumbnail);
-      free(embedding_str);
-      return -1;
-    }
-    fsize = (size_t)fsize_l;
-
-    if (fseek(f, 0L, SEEK_SET) != 0) {
-      Errnof(E_FAIL, "fseek (start) failed for '%s'", img->path);
-      fclose(f);
-      free(thumbnail);
-      free(embedding_str);
-      return -1;
-    }
-
-    unsigned char *img_buf = malloc(fsize);
-    if (!img_buf || fread(img_buf, 1, fsize, f) != fsize) {
-      Errorf(E_FAIL, "failed to read '%s'", img->path);
-      free(img_buf);
-      fclose(f);
-      free(thumbnail);
-      free(embedding_str);
-      return -1;
-    }
-    fclose(f);
-
-    unsigned char md[32];
-    unsigned int md_len;
-    EVP_Digest(img_buf, fsize, md, &md_len, EVP_sha256(), NULL);
-    for (unsigned int i = 0; i < md_len; i++)
-      sprintf(hex + i * 2, "%02x", md[i]);
-    hex[64] = '\0';
-    free(img_buf);
-
-    magic_t mime = magic_open(MAGIC_MIME_TYPE);
-    if (!mime) {
-      Errorf(E_FAIL, "magic_open failed for '%s'", img->path);
-      free(thumbnail);
-      free(embedding_str);
-      return -1;
-    }
-    if (magic_load(mime, NULL) != 0) {
-      Errorf(E_FAIL, "magic_load failed for '%s': %s", img->path, magic_error(mime));
-      magic_close(mime);
-      free(thumbnail);
-      free(embedding_str);
-      return -1;
-    }
-    const char *mime_result = magic_file(mime, img->path);
-    if (!mime_result) {
-      Errorf(E_FAIL, "magic_file failed for '%s': %s", img->path, magic_error(mime));
-      magic_close(mime);
-      free(thumbnail);
-      free(embedding_str);
-      return -1;
-    }
-    // magic_file's return value is owned by the magic_t handle and becomes
-    // invalid once it is closed, so make our own copy before closing.
-    mime_type = strdup(mime_result);
-    magic_close(mime);
-    if (!mime_type) {
-      Errnof(E_CRIT, "strdup failed for mime_type");
-      free(thumbnail);
-      free(embedding_str);
-      return -1;
-    }
   }
 
   // slug
