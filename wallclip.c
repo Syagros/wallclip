@@ -108,6 +108,35 @@ int process_img(image_ctx_t *img) {
     }
   }
 
+  {
+    // deduplication check
+      const char *paramValues[1] = { hex };
+      PGresult *res = PQexecParams(
+                                   img->conn,
+                                   "SELECT 1 FROM wallpapers WHERE checksum = $1 LIMIT 1",
+                                   1,            // nParams
+                                   NULL,         // paramTypes (let server infer)
+                                   paramValues,
+                                   NULL,         // paramLengths (text params, ignored)
+                                   NULL,         // paramFormats (text)
+                                   0);           // resultFormat: text
+
+      if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+        Errorf(E_FAIL, "checksum query failed: %s", PQerrorMessage(img->conn));
+        free(mime_type);
+        PQclear(res);
+        return -1;
+      }
+
+      int found = PQntuples(res) > 0;
+      PQclear(res);
+      if (found)
+        { Errorf(E_WARN, "checksum of %s found in database, skipping as a duplicate.", img->path);
+          free(mime_type);
+          return -1;
+        }
+  }
+  
   int vec_dim = clip_get_vision_hparams(img->clip_ctx)->projection_dim;
 
   // Load image from disk
