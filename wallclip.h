@@ -1,3 +1,1 @@
-const char database[16] = "CHANGE ME!";
-const char username[16] = "CHANGE ME!";
-const char password[65] = "CHANGE ME!";
+const char conninfo[256] = "dbname=CHANGEME! user=CHANGEME! password=CHANGEME!";
