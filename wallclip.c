@@ -11,9 +11,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define CLIP_MODEL_PATH                                                        \
-  "/usr/local/src/clip.cpp/models/clip-vit-base-patch32_ggml-model-f32.gguf"
-
 typedef struct {
   const char *path;
   struct clip_ctx *clip_ctx;
