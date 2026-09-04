@@ -1,6 +1,6 @@
 *vterm*
 wallclip
-wallclip_debug
-.env
+wallclip.h
 cancer/
 samples/
+test/
