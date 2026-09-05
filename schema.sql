@@ -10,11 +10,10 @@ CREATE TABLE wallpapers (
     file_size       integer NOT NULL CHECK (file_size > 0),
     width           integer NOT NULL CHECK (width > 0),
     height          integer NOT NULL CHECK (height > 0),
-    checksum        text NOT NULL UNIQUE,
+    checksum        bytea NOT NULL UNIQUE,
     embedding       vector(512),
     download_count  bigint NOT NULL DEFAULT 0 CHECK (download_count >= 0),
-    created_at      timestamptz NOT NULL,
-    updated_at      timestamptz NOT NULL DEFAULT now()
+    created_at      timestamptz NOT NULL
 );
 
 CREATE INDEX idx_wallpapers_created ON wallpapers (created_at DESC);
