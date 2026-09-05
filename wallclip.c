@@ -4,6 +4,7 @@
 #include <MagickWand/MagickWand.h>
 #include <clip.h>
 #include <ctype.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <libgen.h>
 #include <libpq-fe.h>
@@ -17,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 typedef struct {
   char *path;
@@ -49,6 +51,9 @@ int process_img(image_ctx_t *img) {
     FILE *f = fopen(img->entry->path, "rb");
     if (!f) {
       Errnof(E_FAIL, "fopen failed for '%s'", img->entry->path);
+#if !defined(DEBUG)
+      fprintf(stderr, "wallclip: %s: %s\n", img->entry->path, strerror(errno));
+#endif
       return -1;
     }
 
@@ -59,6 +64,9 @@ int process_img(image_ctx_t *img) {
     unsigned char *img_buf = malloc(size_f);
     if (!img_buf || fread(img_buf, 1, size_f, f) != size_f) {
       Errorf(E_FAIL, "failed to read '%s'", img->entry->path);
+#if !defined(DEBUG)
+      fprintf(stderr, "wallclip: failed to read '%s'\n", img->entry->path);
+#endif
       free(img_buf);
       fclose(f);
       return -1;
@@ -68,6 +76,9 @@ int process_img(image_ctx_t *img) {
     if (!EVP_Digest(img_buf, size_f, (unsigned char *)md, &md_len, EVP_sha256(),
                     NULL)) {
       Errorf(E_FAIL, "EVP_Digest failed for '%s'", img->entry->path);
+#if !defined(DEBUG)
+      fprintf(stderr, "wallclip: failed to hash '%s'\n", img->entry->path);
+#endif
       free(img_buf);
       return -1;
     }
@@ -75,12 +86,21 @@ int process_img(image_ctx_t *img) {
     magic_t mime = magic_open(MAGIC_MIME_TYPE);
     if (!mime) {
       Errorf(E_FAIL, "magic_open failed for '%s'", img->entry->path);
+#if !defined(DEBUG)
+      fprintf(stderr,
+              "wallclip: failed to initialize mime detection for '%s'\n",
+              img->entry->path);
+#endif
       free(img_buf);
       return -1;
     }
     if (magic_load(mime, NULL) != 0) {
       Errorf(E_FAIL, "magic_load failed for '%s': %s", img->entry->path,
              magic_error(mime));
+#if !defined(DEBUG)
+      fprintf(stderr, "wallclip: magic_load failed for '%s': %s\n",
+              img->entry->path, magic_error(mime));
+#endif
       magic_close(mime);
       free(img_buf);
       return -1;
@@ -90,6 +110,10 @@ int process_img(image_ctx_t *img) {
     if (!mime_result) {
       Errorf(E_FAIL, "magic_file failed for '%s': %s", img->entry->path,
              magic_error(mime));
+#if !defined(DEBUG)
+      fprintf(stderr, "wallclip: failed to detect mime type for '%s': %s\n",
+              img->entry->path, magic_error(mime));
+#endif
       magic_close(mime);
       free(img_buf);
       return -1;
@@ -102,6 +126,10 @@ int process_img(image_ctx_t *img) {
     free(img_buf);
     if (!mime_type) {
       Errnof(E_CRIT, "strdup failed for mime_type");
+#if !defined(DEBUG)
+      fprintf(stderr, "wallclip: out of memory processing '%s'\n",
+              img->entry->path);
+#endif
       return -1;
     }
   }
@@ -134,6 +162,10 @@ int process_img(image_ctx_t *img) {
     struct clip_image_u8 *img0 = clip_image_u8_make();
     if (!clip_image_load_from_file(img->entry->path, img0)) {
       Errnof(E_FAIL, "failed to load image from '%s'", img->entry->path);
+#if !defined(DEBUG)
+      fprintf(stderr, "wallclip: failed to load image '%s'\n",
+              img->entry->path);
+#endif
       clip_image_u8_free(img0);
       free(mime_type);
       return -1;
@@ -142,6 +174,10 @@ int process_img(image_ctx_t *img) {
     struct clip_image_f32 *img_res = clip_image_f32_make();
     if (!clip_image_preprocess(img->clip_ctx, img0, img_res)) {
       Errorf(E_FAIL, "failed to preprocess image '%s'", img->entry->path);
+#if !defined(DEBUG)
+      fprintf(stderr, "wallclip: failed to preprocess image '%s'\n",
+              img->entry->path);
+#endif
       clip_image_f32_free(img_res);
       clip_image_u8_free(img0);
       free(mime_type);
@@ -151,6 +187,10 @@ int process_img(image_ctx_t *img) {
     float img_vec[vec_dim];
     if (!clip_image_encode(img->clip_ctx, 4, img_res, img_vec, true)) {
       Errorf(E_FAIL, "failed to encode image '%s'", img->entry->path);
+#if !defined(DEBUG)
+      fprintf(stderr, "wallclip: failed to encode image '%s'\n",
+              img->entry->path);
+#endif
       clip_image_u8_free(img0);
       clip_image_f32_free(img_res);
       free(mime_type);
@@ -164,6 +204,10 @@ int process_img(image_ctx_t *img) {
     embedding_str = malloc(cap);
     if (!embedding_str) {
       Errnof(E_CRIT, "malloc failed for embedding_str (%d dims)", vec_dim);
+#if !defined(DEBUG)
+      fprintf(stderr, "wallclip: out of memory processing '%s'\n",
+              img->entry->path);
+#endif
       free(mime_type);
       return -1;
     }
@@ -178,6 +222,11 @@ int process_img(image_ctx_t *img) {
       if (n < 0 || (size_t)n >= cap - used) {
         Errorf(E_CRIT, "embedding string truncated/overflowed for '%s'",
                img->entry->path);
+#if !defined(DEBUG)
+        fprintf(stderr,
+                "wallclip: internal error building embedding for '%s'\n",
+                img->entry->path);
+#endif
         free(embedding_str);
         free(mime_type);
         return -1;
@@ -205,6 +254,10 @@ int process_img(image_ctx_t *img) {
     char *path_copy2 = strdup(img->entry->path);
     if (!path_copy1 || !path_copy2) {
       Errnof(E_CRIT, "strdup failed for path");
+#if !defined(DEBUG)
+      fprintf(stderr, "wallclip: out of memory processing '%s'\n",
+              img->entry->path);
+#endif
       free(path_copy1);
       free(path_copy2);
       free(embedding_str);
@@ -218,6 +271,10 @@ int process_img(image_ctx_t *img) {
     snprintf(thumb_dir, sizeof(thumb_dir), "%s/.thumbnails", fdir);
     if (mkdir(thumb_dir, 0755) != 0 && errno != EEXIST) {
       Errnof(E_FAIL, "mkdir failed for '%s'", thumb_dir);
+#if !defined(DEBUG)
+      fprintf(stderr, "wallclip: mkdir failed for '%s': %s\n", thumb_dir,
+              strerror(errno));
+#endif
       free(path_copy1);
       free(path_copy2);
       free(embedding_str);
@@ -226,10 +283,14 @@ int process_img(image_ctx_t *img) {
     }
 
     size_t thumb_len =
-        strlen(fdir) + strlen("/.thumbnails/") + strlen(fname) + 1;
+        strlen(fdir) + strlen("/.thumbnails/") + strlen(fname) + 16;
     thumbnail = malloc(thumb_len);
     if (!thumbnail) {
       Errnof(E_CRIT, "malloc failed for thumbnail path");
+#if !defined(DEBUG)
+      fprintf(stderr, "wallclip: out of memory processing '%s'\n",
+              img->entry->path);
+#endif
       free(path_copy1);
       free(path_copy2);
       free(embedding_str);
@@ -238,26 +299,51 @@ int process_img(image_ctx_t *img) {
     }
     // Thumbnails are always re-encoded as JPEG below (MagickSetImageFormat),
     // so name the thumbnail file .jpg regardless of the source image's own
-    // extension (.png, .jpeg, .webp, ...) instead of reusing it verbatim.
+    // extension. If a thumbnail with that base name already exists (e.g. two
+    // source files sharing a name but differing in extension), suffix with
+    // -1, -2, ... until a free path is found.
     char *fname_noext = strdup(fname);
     if (!fname_noext) {
       Errnof(E_CRIT, "strdup failed building thumbnail path");
-      free(fname_noext);
+#if !defined(DEBUG)
+      fprintf(stderr, "wallclip: out of memory processing '%s'\n",
+              img->entry->path);
+#endif
       free(path_copy1);
       free(path_copy2);
+      free(thumbnail);
       free(embedding_str);
       free(mime_type);
-      free(thumbnail);
       return -1;
     }
     char *base_ext = strrchr(fname_noext, '.');
     if (base_ext && base_ext != fname_noext)
       *base_ext = '\0';
-    snprintf(thumbnail, thumb_len, "%s/.thumbnails/%s.jpg", fdir, fname_noext);
+
+    int suffix = 0;
+    for (;;) {
+      if (suffix == 0) {
+        snprintf(thumbnail, thumb_len, "%s/.thumbnails/%s.jpg", fdir,
+                 fname_noext);
+      } else {
+        snprintf(thumbnail, thumb_len, "%s/.thumbnails/%s-%d.jpg", fdir,
+                 fname_noext, suffix);
+      }
+      if (access(thumbnail, F_OK) != 0)
+        break; // path is free
+      suffix++;
+    }
 
     MagickWand *magick_wand = NewMagickWand();
     if (MagickReadImage(magick_wand, img->entry->path) == MagickFalse) {
-      Errorf(E_FAIL, "MagickReadImage failed for '%s'", img->entry->path);
+      ExceptionType severity;
+      char *magick_err = MagickGetException(magick_wand, &severity);
+      Errorf(E_FAIL, "MagickReadImage failed for '%s': %s", img->entry->path,
+             magick_err);
+#if !defined(DEBUG)
+      fprintf(stderr, "wallclip: %s\n", magick_err);
+#endif
+      magick_err = (char *)MagickRelinquishMemory(magick_err);
       magick_wand = DestroyMagickWand(magick_wand);
       free(thumbnail);
       free(embedding_str);
@@ -283,7 +369,14 @@ int process_img(image_ctx_t *img) {
 
       if (MagickResizeImage(magick_wand, new_w, new_h, LanczosFilter) ==
           MagickFalse) {
-        Errorf(E_FAIL, "MagickResizeImage failed for '%s'", img->entry->path);
+        ExceptionType severity;
+        char *magick_err = MagickGetException(magick_wand, &severity);
+        Errorf(E_FAIL, "MagickResizeImage failed for '%s': %s",
+               img->entry->path, magick_err);
+#if !defined(DEBUG)
+        fprintf(stderr, "wallclip: %s\n", magick_err);
+#endif
+        magick_err = (char *)MagickRelinquishMemory(magick_err);
         magick_wand = DestroyMagickWand(magick_wand);
         free(path_copy1);
         free(path_copy2);
@@ -296,7 +389,14 @@ int process_img(image_ctx_t *img) {
     }
 
     if (MagickSetImageFormat(magick_wand, "JPEG") == MagickFalse) {
-      Errorf(E_FAIL, "MagickSetImageFormat failed for '%s'", img->entry->path);
+      ExceptionType severity;
+      char *magick_err = MagickGetException(magick_wand, &severity);
+      Errorf(E_FAIL, "MagickSetImageFormat failed for '%s': %s",
+             img->entry->path, magick_err);
+#if !defined(DEBUG)
+      fprintf(stderr, "wallclip: %s\n", magick_err);
+#endif
+      magick_err = (char *)MagickRelinquishMemory(magick_err);
       magick_wand = DestroyMagickWand(magick_wand);
       free(path_copy1);
       free(path_copy2);
@@ -308,7 +408,14 @@ int process_img(image_ctx_t *img) {
     }
 
     if (MagickWriteImages(magick_wand, thumbnail, MagickTrue) == MagickFalse) {
-      Errorf(E_FAIL, "MagickWriteImages failed for '%s'", img->entry->path);
+      ExceptionType severity;
+      char *magick_err = MagickGetException(magick_wand, &severity);
+      Errorf(E_FAIL, "MagickWriteImages failed for '%s': %s", img->entry->path,
+             magick_err);
+#if !defined(DEBUG)
+      fprintf(stderr, "wallclip: %s\n", magick_err);
+#endif
+      magick_err = (char *)MagickRelinquishMemory(magick_err);
       magick_wand = DestroyMagickWand(magick_wand);
       free(thumbnail);
       free(embedding_str);
@@ -331,6 +438,10 @@ int process_img(image_ctx_t *img) {
     char *path_copy = strdup(img->entry->path);
     if (!path_copy) {
       Errnof(E_CRIT, "strdup failed building title");
+#if !defined(DEBUG)
+      fprintf(stderr, "wallclip: out of memory processing '%s'\n",
+              img->entry->path);
+#endif
       free(mime_type);
       free(thumbnail);
       free(embedding_str);
@@ -343,6 +454,11 @@ int process_img(image_ctx_t *img) {
     title = strdup(title_raw);
     free(path_copy);
     if (!title) {
+      Errnof(E_CRIT, "strdup failed building title");
+#if !defined(DEBUG)
+      fprintf(stderr, "wallclip: out of memory processing '%s'\n",
+              img->entry->path);
+#endif
       free(mime_type);
       free(thumbnail);
       free(embedding_str);
@@ -353,6 +469,11 @@ int process_img(image_ctx_t *img) {
   size_t title_len = strlen(title);
   char *slug = malloc(title_len + 1);
   if (!slug) {
+    Errnof(E_CRIT, "malloc failed for slug");
+#if !defined(DEBUG)
+    fprintf(stderr, "wallclip: out of memory processing '%s'\n",
+            img->entry->path);
+#endif
     free(title);
     free(mime_type);
     free(thumbnail);
@@ -420,6 +541,10 @@ int process_img(image_ctx_t *img) {
         char *new_slug = malloc(base_len + 16);
         if (!new_slug) {
           Errnof(E_CRIT, "malloc failed building unique slug");
+#if !defined(DEBUG)
+          fprintf(stderr, "wallclip: out of memory processing '%s'\n",
+                  img->entry->path);
+#endif
           PQclear(check_res);
           free(slug);
           free(title);
@@ -464,6 +589,10 @@ int process_img(image_ctx_t *img) {
     if (PQresultStatus(res_insert) != PGRES_COMMAND_OK) {
       Errorf(E_FAIL, "insert failed for '%s': %s", img->entry->path,
              PQresultErrorMessage(res_insert));
+#if !defined(DEBUG)
+      fprintf(stderr, "wallclip: insert failed for '%s': %s\n",
+              img->entry->path, PQresultErrorMessage(res_insert));
+#endif
       PQclear(res_insert);
       free(slug);
       free(title);
@@ -489,7 +618,7 @@ file_list_t *file_list_new(size_t count) {
     return NULL;
   }
   list->count = count;
-  list->entries = malloc(count * sizeof(*list->entries));
+  list->entries = calloc(count, sizeof(*list->entries));
   if (!list->entries) {
     Errnof(E_FAIL, "malloc failed");
     free(list);
@@ -519,7 +648,12 @@ int main(int argc, char *argv[]) {
     struct stat st;
     if (stat(argv[i], &st) != 0) {
       Errnof(E_FAIL, "%s: does not exist", argv[i]);
+#if !defined(DEBUG)
+      fprintf(stderr, "wallclip: %s: %s\n", argv[i], strerror(errno));
+#endif
       file_list_free(file_list);
+      file_list_free(file_list_failures);
+      file_list_free(file_list_duplicates);
       exit(EXIT_FAILURE);
     }
 
