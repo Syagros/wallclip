@@ -1,0 +1,27 @@
+[
+  {
+    "file": "wallclip.c",
+    "arguments": [
+      "/usr/bin/gcc",
+      "-Wall",
+      "-Wextra",
+      "-O2",
+      "-I/usr/include/ImageMagick-7",
+      "-DMAGICKCORE_HDRI_ENABLE=0",
+      "-DMAGICKCORE_QUANTUM_DEPTH=16",
+      "-DMAGICKCORE_CHANNEL_MASK_DEPTH=32",
+      "-I/usr/local/src/clip.cpp",
+      "-I/usr/local/src/clip.cpp/ggml/include",
+      "-fsanitize=address,undefined",
+      "-fno-omit-frame-pointer",
+      "-g",
+      "-O0",
+      "-DDEBUG",
+      "-o",
+      "wallclip",
+      "wallclip.c"
+    ],
+    "directory": "/home/oc/C/wallclip",
+    "output": "wallclip"
+  }
+]
