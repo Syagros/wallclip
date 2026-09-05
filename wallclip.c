@@ -1,8 +1,12 @@
+#define _GNU_SOURCE // needed for statx()
 #include "wallclip.h"
 #include "../logging/log.h"
 #include <MagickWand/MagickWand.h>
 #include <clip.h>
+#include <fcntl.h>
+#include <libgen.h>
 #include <libpq-fe.h>
+#include <limits.h>
 #include <magic.h>
 #include <openssl/evp.h>
 #include <stdbool.h>
@@ -10,9 +14,22 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 typedef struct {
-  const char *path;
+  char *path;
+  size_t fsize;
+  time_t created_at;
+  time_t modified_at;
+} file_entry_t;
+
+typedef struct {
+  file_entry_t *entries;
+  int count;
+} file_list_t;
+
+typedef struct {
+  file_entry_t *entry;
   struct clip_ctx *clip_ctx;
   PGconn *conn;
 } image_ctx_t;
@@ -20,26 +37,25 @@ typedef struct {
 int process_img(image_ctx_t *img) {
   // checksum + mime type
   char md[32];
-  unsigned int md_len;
-  unsigned long size_f;
   char *embedding_str;
   char *mime_type;
+  char *thumbnail;
+  unsigned int md_len;
+  size_t width, height;
   {
-    FILE *f = fopen(img->path, "rb");
+    FILE *f = fopen(img->entry->path, "rb");
     if (!f) {
-      Errnof(E_FAIL, "fopen failed for '%s'", img->path);
+      Errnof(E_FAIL, "fopen failed for '%s'", img->entry->path);
       return -1;
     }
 
-    fseek(f, 0L, SEEK_END);
-
-    size_f = ftell(f);
-
-    fseek(f, 0L, SEEK_SET);
+    // fsize is already known from the upfront stat() in main(), no need to
+    // fseek/ftell here.
+    size_t size_f = img->entry->fsize;
 
     unsigned char *img_buf = malloc(size_f);
     if (!img_buf || fread(img_buf, 1, size_f, f) != size_f) {
-      Errorf(E_FAIL, "failed to read '%s'", img->path);
+      Errorf(E_FAIL, "failed to read '%s'", img->entry->path);
       free(img_buf);
       fclose(f);
       return -1;
@@ -51,34 +67,37 @@ int process_img(image_ctx_t *img) {
 
     magic_t mime = magic_open(MAGIC_MIME_TYPE);
     if (!mime) {
-      Errorf(E_FAIL, "magic_open failed for '%s'", img->path);
+      Errorf(E_FAIL, "magic_open failed for '%s'", img->entry->path);
+      free(img_buf);
       return -1;
     }
     if (magic_load(mime, NULL) != 0) {
-      Errorf(E_FAIL, "magic_load failed for '%s': %s", img->path,
+      Errorf(E_FAIL, "magic_load failed for '%s': %s", img->entry->path,
              magic_error(mime));
       magic_close(mime);
+      free(img_buf);
       return -1;
     }
 
     const char *mime_result = magic_buffer(mime, img_buf, size_f);
     if (!mime_result) {
-      Errorf(E_FAIL, "magic_file failed for '%s': %s", img->path,
+      Errorf(E_FAIL, "magic_file failed for '%s': %s", img->entry->path,
              magic_error(mime));
       magic_close(mime);
+      free(img_buf);
       return -1;
     }
 
-    // magic_file's return value is owned by the magic_t handle and becomes
+    // magic_buffer's return value is owned by the magic_t handle and becomes
     // invalid once it is closed, so make our own copy before closing.
     mime_type = strdup(mime_result);
     magic_close(mime);
+    free(img_buf);
     if (!mime_type) {
       Errnof(E_CRIT, "strdup failed for mime_type");
       return -1;
     }
     printf("%s\n", mime_type);
-    free(img_buf);
   }
 
   // deduplication check using checksum
@@ -96,7 +115,7 @@ int process_img(image_ctx_t *img) {
     if (PQntuples(res) > 0) {
       PQclear(res);
       free(mime_type);
-      Errorf(E_WARN, "Skipping %s, duplicate.", img->path);
+      Errorf(E_WARN, "Skipping %s, duplicate.", img->entry->path);
       return 1;
     }
     PQclear(res);
@@ -107,8 +126,8 @@ int process_img(image_ctx_t *img) {
   {
     // Load image from disk
     struct clip_image_u8 *img0 = clip_image_u8_make();
-    if (!clip_image_load_from_file(img->path, img0)) {
-      Errnof(E_FAIL, "failed to load image from '%s'", img->path);
+    if (!clip_image_load_from_file(img->entry->path, img0)) {
+      Errnof(E_FAIL, "failed to load image from '%s'", img->entry->path);
       clip_image_u8_free(img0);
       free(mime_type);
       return -1;
@@ -116,7 +135,7 @@ int process_img(image_ctx_t *img) {
     // Preprocess image
     struct clip_image_f32 *img_res = clip_image_f32_make();
     if (!clip_image_preprocess(img->clip_ctx, img0, img_res)) {
-      Errorf(E_FAIL, "failed to preprocess image '%s'", img->path);
+      Errorf(E_FAIL, "failed to preprocess image '%s'", img->entry->path);
       clip_image_f32_free(img_res);
       clip_image_u8_free(img0);
       free(mime_type);
@@ -125,7 +144,7 @@ int process_img(image_ctx_t *img) {
     // Encode image
     float img_vec[vec_dim];
     if (!clip_image_encode(img->clip_ctx, 4, img_res, img_vec, true)) {
-      Errorf(E_FAIL, "failed to encode image '%s'", img->path);
+      Errorf(E_FAIL, "failed to encode image '%s'", img->entry->path);
       clip_image_u8_free(img0);
       clip_image_f32_free(img_res);
       free(mime_type);
@@ -139,7 +158,6 @@ int process_img(image_ctx_t *img) {
     embedding_str = malloc(cap);
     if (!embedding_str) {
       Errnof(E_CRIT, "malloc failed for embedding_str (%d dims)", vec_dim);
-      free(embedding_str);
       free(mime_type);
       return -1;
     }
@@ -153,7 +171,7 @@ int process_img(image_ctx_t *img) {
                    (i < vec_dim - 1) ? "," : "");
       if (n < 0 || (size_t)n >= cap - used) {
         Errorf(E_CRIT, "embedding string truncated/overflowed for '%s'",
-               img->path);
+               img->entry->path);
         free(embedding_str);
         free(mime_type);
         return -1;
@@ -163,17 +181,40 @@ int process_img(image_ctx_t *img) {
     snprintf(embedding_str + used, cap - used, "]");
   }
 
+  {
+    // created_at / modified_at already known from the upfront stat/statx in
+    // main() — no need to re-stat here.
+    char created_str[32], updated_str[32];
+
+    struct tm tm_created, tm_modified;
+    if (!localtime_r(&img->entry->created_at, &tm_created) ||
+        !strftime(created_str, sizeof(created_str), "%Y-%m-%d %H:%M:%S",
+                  &tm_created)) {
+      snprintf(created_str, sizeof(created_str), "unknown");
+    }
+    if (!localtime_r(&img->entry->modified_at, &tm_modified) ||
+        !strftime(updated_str, sizeof(updated_str), "%Y-%m-%d %H:%M:%S",
+                  &tm_modified)) {
+      snprintf(updated_str, sizeof(updated_str), "unknown");
+    }
+  }
+
+  // thumbnail + dimensions
+  {
+  }
+
   // insert
   {
     const char *paramValues[3] = {mime_type, md, embedding_str};
     int paramLengths[3] = {0, 32, 0}; // 0 cus ignored for text param
     int paramFormats[3] = {0, 1, 0};  // 0 = text, 1 = binary
-    const char *insert = "INSERT INTO wallpapers (mime_type, checksum, embedding) VALUES ($1, $2, $3)";
+    const char *insert = "INSERT INTO wallpapers (mime_type, checksum, "
+                         "embedding) VALUES ($1, $2, $3)";
     PGresult *res_insert = PQexecParams(img->conn, insert, 3, NULL, paramValues,
                                         paramLengths, paramFormats, 0);
 
     if (PQresultStatus(res_insert) != PGRES_COMMAND_OK) {
-      Errorf(E_FAIL, "insert failed for '%s': %s", img->path,
+      Errorf(E_FAIL, "insert failed for '%s': %s", img->entry->path,
              PQresultErrorMessage(res_insert));
       PQclear(res_insert);
       free(embedding_str);
@@ -187,26 +228,91 @@ int process_img(image_ctx_t *img) {
   }
 }
 
+file_list_t *file_list_new(size_t count) {
+  file_list_t *list = malloc(sizeof(*list));
+  if (!list) {
+    Errnof(E_FAIL, "malloc failed");
+    return NULL;
+  }
+  list->count = count;
+  list->entries = malloc(count * sizeof(*list->entries));
+  if (!list->entries) {
+    Errnof(E_FAIL, "malloc failed");
+    free(list);
+    return NULL;
+  }
+
+  return list;
+}
+
+void file_list_free(file_list_t *list) {
+  if (!list)
+    return;
+  for (int i = 0; i < list->count; i++)
+    free(list->entries[i].path);
+  free(list->entries);
+  free(list);
+}
+
 int main(int argc, char *argv[]) {
-  printf("%d\n", argc);
-  image_ctx_t img;
-  img.path = argv[1];
-  img.conn = PQconnectdb(conninfo);
-  if (PQstatus(img.conn) != CONNECTION_OK) {
-    Errorf(E_FAIL, "connection failed: %s", PQerrorMessage(img.conn));
-    PQfinish(img.conn);
+  file_list_t *file_list = file_list_new(argc - 1);
+  if (!file_list)
+    exit(EXIT_FAILURE);
+
+  for (int i = 1; i < argc; i++) {
+    struct stat st;
+    if (stat(argv[i], &st) != 0) {
+      Errnof(E_FAIL, "%s: does not exist", argv[i]);
+      file_list_free(file_list);
+      exit(EXIT_FAILURE);
+    }
+
+    file_entry_t *e = &file_list->entries[i - 1];
+    e->path = strdup(argv[i]);
+    e->fsize = st.st_size;
+    e->modified_at = st.st_mtime;
+
+    struct statx stx;
+    if (statx(AT_FDCWD, argv[i], 0, STATX_BTIME, &stx) == 0 &&
+        (stx.stx_mask & STATX_BTIME)) {
+      e->created_at = stx.stx_btime.tv_sec;
+    } else {
+      e->created_at = 0;
+    }
+  }
+
+  PGconn *conn = PQconnectdb(conninfo);
+  if (PQstatus(conn) != CONNECTION_OK) {
+    Errorf(E_FAIL, "connection failed: %s", PQerrorMessage(conn));
+    PQfinish(conn);
     Errorf(E_CRIT, "Failed to make postgresql db connection.");
+    file_list_free(file_list);
     return 1;
   }
 
-  img.clip_ctx = clip_model_load(CLIP_MODEL_PATH, 0);
-  if (!img.clip_ctx) {
+  struct clip_ctx *clip_ctx = clip_model_load(CLIP_MODEL_PATH, 0);
+  if (!clip_ctx) {
     Errorf(E_FAIL, "Unable to load model from %s", CLIP_MODEL_PATH);
+    PQfinish(conn);
+    file_list_free(file_list);
     exit(EXIT_FAILURE);
   }
 
-  process_img(&img); // error handling? what's that?
-  PQfinish(img.conn);
-  clip_free(img.clip_ctx);
-  return 0;
+  int failures = 0;
+  for (int i = 0; i < file_list->count; i++) {
+    image_ctx_t img = {
+        .entry = &file_list->entries[i],
+        .clip_ctx = clip_ctx,
+        .conn = conn,
+    };
+    if (process_img(&img) < 0) {
+      Errorf(E_WARN, "failed to process '%s'", file_list->entries[i].path);
+      failures++;
+    }
+  }
+
+  PQfinish(conn);
+  clip_free(clip_ctx);
+  file_list_free(file_list);
+  return failures > 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 }
