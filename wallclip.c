@@ -3,11 +3,13 @@
 #include "../logging/log.h"
 #include <MagickWand/MagickWand.h>
 #include <clip.h>
+#include <ctype.h>
 #include <fcntl.h>
 #include <libgen.h>
 #include <libpq-fe.h>
 #include <limits.h>
 #include <magic.h>
+#include <math.h>
 #include <openssl/evp.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -41,6 +43,7 @@ int process_img(image_ctx_t *img) {
   char *mime_type;
   char *thumbnail;
   unsigned int md_len;
+  char created_str[32];
   size_t width, height;
   {
     FILE *f = fopen(img->entry->path, "rb");
@@ -62,8 +65,12 @@ int process_img(image_ctx_t *img) {
     }
     fclose(f);
 
-    EVP_Digest(img_buf, size_f, (unsigned char *)md, &md_len, EVP_sha256(),
-               NULL);
+    if (!EVP_Digest(img_buf, size_f, (unsigned char *)md, &md_len, EVP_sha256(),
+                    NULL)) {
+      Errorf(E_FAIL, "EVP_Digest failed for '%s'", img->entry->path);
+      free(img_buf);
+      return -1;
+    }
 
     magic_t mime = magic_open(MAGIC_MIME_TYPE);
     if (!mime) {
@@ -97,7 +104,6 @@ int process_img(image_ctx_t *img) {
       Errnof(E_CRIT, "strdup failed for mime_type");
       return -1;
     }
-    printf("%s\n", mime_type);
   }
 
   // deduplication check using checksum
@@ -182,44 +188,294 @@ int process_img(image_ctx_t *img) {
   }
 
   {
-    char created_str[32], updated_str[32];
-
-    struct tm tm_created, tm_modified;
+    struct tm tm_created;
     if (!localtime_r(&img->entry->created_at, &tm_created) ||
         !strftime(created_str, sizeof(created_str), "%Y-%m-%d %H:%M:%S",
                   &tm_created)) {
-      snprintf(created_str, sizeof(created_str), "unknown");
-    }
-    if (!localtime_r(&img->entry->modified_at, &tm_modified) ||
-        !strftime(updated_str, sizeof(updated_str), "%Y-%m-%d %H:%M:%S",
-                  &tm_modified)) {
-      snprintf(updated_str, sizeof(updated_str), "unknown");
+      Errorf(E_WARN, "failed to format created_at for '%s', using current time",
+             img->entry->path);
+      snprintf(created_str, sizeof(created_str),
+               "now"); // Postgres understands 'now'
     }
   }
 
   // thumbnail + dimensions
   {
+    char *path_copy1 = strdup(img->entry->path);
+    char *path_copy2 = strdup(img->entry->path);
+    if (!path_copy1 || !path_copy2) {
+      Errnof(E_CRIT, "strdup failed for path");
+      free(path_copy1);
+      free(path_copy2);
+      free(embedding_str);
+      free(mime_type);
+      return -1;
+    }
+    char *fname = basename(path_copy1);
+    char *fdir = dirname(path_copy2);
+
+    char thumb_dir[PATH_MAX];
+    snprintf(thumb_dir, sizeof(thumb_dir), "%s/.thumbnails", fdir);
+    if (mkdir(thumb_dir, 0755) != 0 && errno != EEXIST) {
+      Errnof(E_FAIL, "mkdir failed for '%s'", thumb_dir);
+      free(path_copy1);
+      free(path_copy2);
+      free(embedding_str);
+      free(mime_type);
+      return -1;
+    }
+
+    size_t thumb_len =
+        strlen(fdir) + strlen("/.thumbnails/") + strlen(fname) + 1;
+    thumbnail = malloc(thumb_len);
+    if (!thumbnail) {
+      Errnof(E_CRIT, "malloc failed for thumbnail path");
+      free(path_copy1);
+      free(path_copy2);
+      free(embedding_str);
+      free(mime_type);
+      return -1;
+    }
+    // Thumbnails are always re-encoded as JPEG below (MagickSetImageFormat),
+    // so name the thumbnail file .jpg regardless of the source image's own
+    // extension (.png, .jpeg, .webp, ...) instead of reusing it verbatim.
+    char *fname_noext = strdup(fname);
+    if (!fname_noext) {
+      Errnof(E_CRIT, "strdup failed building thumbnail path");
+      free(fname_noext);
+      free(path_copy1);
+      free(path_copy2);
+      free(embedding_str);
+      free(mime_type);
+      free(thumbnail);
+      return -1;
+    }
+    char *base_ext = strrchr(fname_noext, '.');
+    if (base_ext && base_ext != fname_noext)
+      *base_ext = '\0';
+    snprintf(thumbnail, thumb_len, "%s/.thumbnails/%s.jpg", fdir, fname_noext);
+
+    MagickWand *magick_wand = NewMagickWand();
+    if (MagickReadImage(magick_wand, img->entry->path) == MagickFalse) {
+      Errorf(E_FAIL, "MagickReadImage failed for '%s'", img->entry->path);
+      magick_wand = DestroyMagickWand(magick_wand);
+      free(thumbnail);
+      free(embedding_str);
+      free(mime_type);
+      free(path_copy1);
+      free(path_copy2);
+      free(fname_noext);
+      return -1;
+    }
+
+    width = MagickGetImageWidth(magick_wand);
+    height = MagickGetImageHeight(magick_wand);
+
+    MagickResetIterator(magick_wand);
+    while (MagickNextImage(magick_wand) != MagickFalse) {
+      double scale = fmin(640.0 / (double)width, 360.0 / (double)height);
+      size_t new_w = (size_t)(width * scale);
+      size_t new_h = (size_t)(height * scale);
+      if (new_w == 0)
+        new_w = 1;
+      if (new_h == 0)
+        new_h = 1;
+
+      if (MagickResizeImage(magick_wand, new_w, new_h, LanczosFilter) ==
+          MagickFalse) {
+        Errorf(E_FAIL, "MagickResizeImage failed for '%s'", img->entry->path);
+        magick_wand = DestroyMagickWand(magick_wand);
+        free(path_copy1);
+        free(path_copy2);
+        free(fname_noext);
+        free(thumbnail);
+        free(embedding_str);
+        free(mime_type);
+        return -1;
+      }
+    }
+
+    if (MagickSetImageFormat(magick_wand, "JPEG") == MagickFalse) {
+      Errorf(E_FAIL, "MagickSetImageFormat failed for '%s'", img->entry->path);
+      magick_wand = DestroyMagickWand(magick_wand);
+      free(path_copy1);
+      free(path_copy2);
+      free(fname_noext);
+      free(thumbnail);
+      free(embedding_str);
+      free(mime_type);
+      return -1;
+    }
+
+    if (MagickWriteImages(magick_wand, thumbnail, MagickTrue) == MagickFalse) {
+      Errorf(E_FAIL, "MagickWriteImages failed for '%s'", img->entry->path);
+      magick_wand = DestroyMagickWand(magick_wand);
+      free(thumbnail);
+      free(embedding_str);
+      free(mime_type);
+      free(path_copy1);
+      free(path_copy2);
+      free(fname_noext);
+      return -1;
+    }
+    magick_wand = DestroyMagickWand(magick_wand);
+
+    free(path_copy1);
+    free(path_copy2);
+    free(fname_noext);
+  }
+
+  // slug
+  char *title;
+  {
+    char *path_copy = strdup(img->entry->path);
+    if (!path_copy) {
+      Errnof(E_CRIT, "strdup failed building title");
+      free(mime_type);
+      free(thumbnail);
+      free(embedding_str);
+      return -1;
+    }
+    char *title_raw = basename(path_copy);
+    char *dot = strrchr(title_raw, '.');
+    if (dot && dot != title_raw)
+      *dot = '\0';
+    title = strdup(title_raw);
+    free(path_copy);
+    if (!title) {
+      free(mime_type);
+      free(thumbnail);
+      free(embedding_str);
+      return -1;
+    }
+  }
+
+  size_t title_len = strlen(title);
+  char *slug = malloc(title_len + 1);
+  if (!slug) {
+    free(title);
+    free(mime_type);
+    free(thumbnail);
+    free(embedding_str);
+    return -1;
+  }
+
+  char *out = slug;
+  int last_was_hyphen = 1; /* suppress leading hyphens */
+  for (const unsigned char *p = (const unsigned char *)title; *p; p++) {
+    if (isalnum(*p)) {
+      *out++ = (char)tolower(*p);
+      last_was_hyphen = 0;
+    } else if (!last_was_hyphen) {
+      *out++ = '-';
+      last_was_hyphen = 1;
+    }
+  }
+  if (out > slug && *(out - 1) == '-')
+    out--;
+  *out = '\0';
+
+  {
+    const char *check_sql =
+        "SELECT slug FROM wallpapers WHERE slug = $1 OR slug LIKE $1 || '-%'";
+    const char *check_params[1] = {slug};
+    PGresult *check_res = PQexecParams(img->conn, check_sql, 1, NULL,
+                                       check_params, NULL, NULL, 0);
+
+    if (PQresultStatus(check_res) != PGRES_TUPLES_OK) {
+      Errorf(E_FAIL, "slug collision query failed for '%s': %s",
+             img->entry->path, PQerrorMessage(img->conn));
+#if !defined(DEBUG)
+      fprintf(stderr, "wallclip: slug collision query failed for '%s': %s",
+              img->entry->path, PQerrorMessage(img->conn));
+#endif
+      PQclear(check_res);
+      free(slug);
+      free(title);
+      free(mime_type);
+      free(thumbnail);
+      free(embedding_str);
+      return -1;
+    }
+
+    if (PQntuples(check_res) > 0) {
+      int max_n = 0;
+      size_t base_len = strlen(slug);
+      for (int i = 0; i < PQntuples(check_res); i++) {
+        char *existing = PQgetvalue(check_res, i, 0);
+        size_t existing_len = strlen(existing);
+        if (existing_len == base_len && strcmp(existing, slug) == 0) {
+          if (max_n < 1)
+            max_n = 1;
+          continue;
+        }
+        if (existing_len > base_len && strncmp(existing, slug, base_len) == 0 &&
+            existing[base_len] == '-') {
+          int n = atoi(existing + base_len + 1);
+          if (n >= max_n)
+            max_n = n + 1;
+        }
+      }
+      if (max_n > 0) {
+        char *new_slug = malloc(base_len + 16);
+        if (!new_slug) {
+          Errnof(E_CRIT, "malloc failed building unique slug");
+          PQclear(check_res);
+          free(slug);
+          free(title);
+          free(mime_type);
+          free(thumbnail);
+          free(embedding_str);
+          return -1;
+        }
+        snprintf(new_slug, base_len + 16, "%s-%d", slug, max_n);
+        free(slug);
+        slug = new_slug;
+      }
+    }
+    PQclear(check_res);
   }
 
   // insert
   {
-    const char *paramValues[3] = {mime_type, md, embedding_str};
-    int paramLengths[3] = {0, 32, 0}; // 0 cus ignored for text param
-    int paramFormats[3] = {0, 1, 0};  // 0 = text, 1 = binary
-    const char *insert = "INSERT INTO wallpapers (mime_type, checksum, "
-                         "embedding) VALUES ($1, $2, $3)";
-    PGresult *res_insert = PQexecParams(img->conn, insert, 3, NULL, paramValues,
-                                        paramLengths, paramFormats, 0);
+    char fsize_str[32], width_str[32], height_str[32];
+    snprintf(fsize_str, sizeof(fsize_str), "%zu", img->entry->fsize);
+    snprintf(width_str, sizeof(width_str), "%zu", width);
+    snprintf(height_str, sizeof(height_str), "%zu", height);
+
+    const char *paramValues[11] = {
+        title,     slug,          img->entry->path, thumbnail,
+        mime_type, fsize_str,     width_str,        height_str,
+        md,        embedding_str, created_str,
+    };
+    int paramLengths[11] = {0, 0, 0, 0, 0, 0, 0, 0, 32, 0, 0};
+    int paramFormats[11] = {0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0}; // md is binary
+
+    const char *insert =
+        "INSERT INTO wallpapers "
+        "(title, slug, image, thumbnail, mime_type, file_size, width, "
+        "height, checksum, embedding, created_at) "
+        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)";
+
+    PGresult *res_insert =
+        PQexecParams(img->conn, insert, 11, NULL, paramValues, paramLengths,
+                     paramFormats, 0);
 
     if (PQresultStatus(res_insert) != PGRES_COMMAND_OK) {
       Errorf(E_FAIL, "insert failed for '%s': %s", img->entry->path,
              PQresultErrorMessage(res_insert));
       PQclear(res_insert);
+      free(slug);
+      free(title);
+      free(thumbnail);
       free(embedding_str);
       free(mime_type);
       return -1;
     }
     PQclear(res_insert);
+    free(slug);
+    free(title);
+    free(thumbnail);
     free(embedding_str);
     free(mime_type);
     return 0;
@@ -288,7 +544,8 @@ int main(int argc, char *argv[]) {
         (stx.stx_mask & STATX_BTIME)) {
       e->created_at = stx.stx_btime.tv_sec;
     } else {
-      e->created_at = 0;
+      e->created_at = e->modified_at; // fallback for when filesystem doesn't
+                                      // support birth time.
     }
   }
 
