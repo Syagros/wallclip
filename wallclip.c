@@ -268,7 +268,18 @@ int main(int argc, char *argv[]) {
     }
 
     file_entry_t *e = &file_list->entries[i - 1];
-    e->path = strdup(argv[i]);
+    char *resolved_path = realpath(argv[i], NULL);
+    if (!resolved_path) {
+      Errnof(E_FAIL, "realpath failed for '%s'", argv[i]);
+#if !defined(DEBUG)
+      fprintf(stderr, "wallclip: %s: %s\n", argv[i], strerror(errno));
+#endif
+      file_list_free(file_list);
+      file_list_free(file_list_failures);
+      file_list_free(file_list_duplicates);
+      exit(EXIT_FAILURE);
+    }
+    e->path = resolved_path;
     e->fsize = st.st_size;
     e->modified_at = st.st_mtime;
 
