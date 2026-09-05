@@ -182,8 +182,6 @@ int process_img(image_ctx_t *img) {
   }
 
   {
-    // created_at / modified_at already known from the upfront stat/statx in
-    // main() — no need to re-stat here.
     char created_str[32], updated_str[32];
 
     struct tm tm_created, tm_modified;
@@ -256,7 +254,9 @@ void file_list_free(file_list_t *list) {
 
 int main(int argc, char *argv[]) {
   file_list_t *file_list = file_list_new(argc - 1);
-  if (!file_list)
+  file_list_t *file_list_failures = file_list_new(argc - 1);
+  file_list_t *file_list_duplicates = file_list_new(argc - 1);
+  if (!file_list || !file_list_failures || !file_list_duplicates)
     exit(EXIT_FAILURE);
 
   for (int i = 1; i < argc; i++) {
@@ -299,20 +299,59 @@ int main(int argc, char *argv[]) {
   }
 
   int failures = 0;
+  int duplicates = 0;
   for (int i = 0; i < file_list->count; i++) {
     image_ctx_t img = {
         .entry = &file_list->entries[i],
         .clip_ctx = clip_ctx,
         .conn = conn,
     };
-    if (process_img(&img) < 0) {
+    int rc = process_img(&img);
+    if (rc < 0) {
       Errorf(E_WARN, "failed to process '%s'", file_list->entries[i].path);
+#if !defined(DEBUG)
+      fprintf(stderr, "wallclip: failed to process %s\n",
+              file_list->entries[i].path);
+#endif
+      file_list_failures->entries[failures].path =
+          strdup(file_list->entries[i].path);
+      if (!file_list_failures->entries[failures].path) {
+        Errnof(E_CRIT, "strdup failed recording failed path");
+      }
       failures++;
+    } else if (rc > 0) {
+      Errorf(E_WARN, "'%s' is a duplicate, skipping",
+             file_list->entries[i].path);
+#if !defined(DEBUG)
+      fprintf(stderr, "wallclip: '%s' is a duplicate, skipping\n",
+              file_list->entries[i].path);
+#endif
+      file_list_duplicates->entries[duplicates].path =
+          strdup(file_list->entries[i].path);
+      if (!file_list_duplicates->entries[duplicates].path) {
+        Errnof(E_CRIT, "strdup failed recording duplicate path");
+      }
+      duplicates++;
     }
+  }
+  file_list_failures->count = failures;
+  file_list_duplicates->count = duplicates;
+
+  if (failures > 0) {
+    printf("%d image(s) failed processing:\n", failures);
+    for (int i = 0; i < file_list_failures->count; i++)
+      printf("  %s\n", file_list_failures->entries[i].path);
+  }
+  if (duplicates > 0) {
+    printf("%d image(s) skipped as duplicates:\n", duplicates);
+    for (int i = 0; i < file_list_duplicates->count; i++)
+      printf("  %s\n", file_list_duplicates->entries[i].path);
   }
 
   PQfinish(conn);
   clip_free(clip_ctx);
   file_list_free(file_list);
+  file_list_free(file_list_failures);
+  file_list_free(file_list_duplicates);
   return failures > 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 }
