@@ -38,10 +38,119 @@ typedef struct {
   PGconn *conn;
 } image_ctx_t;
 
+
+int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn) {
+  char embedding_str[EMBED_STR_MAX];
+  image_ctx_t img;
+  img.clip_ctx = clip_ctx;
+  img.conn = conn;
+  size_t offset = 0;
+  int written;
+
+  // Tokenize text
+  struct clip_tokens tokens;
+  clip_tokenize(img.clip_ctx, query, &tokens);
+
+  // Encode text
+  int vec_dim = clip_get_text_hparams(clip_ctx)->projection_dim;
+  float vec[vec_dim];
+  clip_text_encode(clip_ctx, 4, &tokens, vec, true);
+
+  // Convert vec to a pg array
+  written = snprintf(embedding_str + offset, EMBED_STR_MAX - offset, "[");
+  if (written < 0 || (size_t)written >= EMBED_STR_MAX - offset) {
+    Errorf(E_CRIT, "Failed to format embedding vector (buffer too small)");
+    clip_tokens_free(&tokens);
+    clip_free(clip_ctx);
+    PQfinish(conn);
+    return -1;
+  }
+  offset += written;
+
+  for (int i = 0; i < vec_dim; i++) {
+    written = snprintf(embedding_str + offset, EMBED_STR_MAX - offset, "%s%.6f",
+                       (i == 0) ? "" : ",", vec[i]);
+    if (written < 0 || (size_t)written >= EMBED_STR_MAX - offset) {
+      Errorf(E_CRIT, "Failed to format embedding vector (buffer too small)");
+      clip_tokens_free(&tokens);
+      clip_free(clip_ctx);
+      PQfinish(conn);
+      return -1;
+    }
+    offset += written;
+  }
+
+  written = snprintf(embedding_str + offset, EMBED_STR_MAX - offset, "]");
+  if (written < 0 || (size_t)written >= EMBED_STR_MAX - offset) {
+    Errorf(E_CRIT, "Failed to format embedding vector (buffer too small)");
+    clip_tokens_free(&tokens);
+    clip_free(clip_ctx);
+    PQfinish(conn);
+    return -1;
+  }
+
+  // Compare embedding_str with pg database embeddings and get thumbnail paths
+  const char *paramValues[1] = {embedding_str};
+  const char *sql = "SELECT thumbnail FROM wallpapers "
+                    "WHERE 1 - (embedding <=> $1::vector(512)) > 0.27 "
+                    "ORDER BY embedding <=> $1::vector(512)";
+
+  PGresult *res = PQexecParams(conn, sql, 1, NULL, paramValues, NULL, NULL, 0);
+  if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+    Errorf(E_FAIL, "similarity query failed: %s", PQerrorMessage(conn));
+    clip_tokens_free(&tokens);
+    clip_free(clip_ctx);
+    PQfinish(conn);
+    PQclear(res);
+    return -1;
+  }
+
+  int n_matches = PQntuples(res);
+  char **match = NULL;
+  if (n_matches > 0) {
+    match = calloc(n_matches, sizeof(char *));
+    if (!match) {
+      Errnof(E_CRIT, "calloc failed for match array");
+      clip_tokens_free(&tokens);
+      clip_free(clip_ctx);
+      PQfinish(conn);
+      PQclear(res);
+      return -1;
+    }
+    for (int i = 0; i < n_matches; i++) {
+      match[i] = strdup(PQgetvalue(res, i, 0));
+      if (!match[i]) {
+        Errnof(E_CRIT, "strdup failed for matched thumbnail path");
+        clip_tokens_free(&tokens);
+        clip_free(clip_ctx);
+        PQfinish(conn);
+        PQclear(res);
+        return -1;
+      }
+    }
+  }
+
+  clip_tokens_free(&tokens);
+  clip_free(clip_ctx);
+  PQfinish(conn);
+  PQclear(res);
+
+  for (int i = 0; i < n_matches; i++) {
+    printf("%s\n", match[i]);
+  }
+
+  for (int i = 0; i < n_matches; i++) {
+    free(match[i]);
+  }
+  free(match);
+
+  return 0;
+}
+
 int process_img(image_ctx_t *img) {
   // checksum + mime type
   char md[32];
-  char *embedding_str;
+  char embedding_str[EMBED_STR_MAX];
   char *mime_type;
   char *thumbnail;
   unsigned int md_len;
@@ -57,7 +166,7 @@ int process_img(image_ctx_t *img) {
       return -1;
     }
 
-    // fsize is already known from the upfront stat() in main(), no need to
+    // fsize is already known from the upfront stat() in main, no need to
     // fseek/ftell here.
     size_t size_f = img->entry->fsize;
 
@@ -158,6 +267,10 @@ int process_img(image_ctx_t *img) {
   int vec_dim = clip_get_vision_hparams(img->clip_ctx)->projection_dim;
 
   {
+    char embedding_str[EMBED_STR_MAX];
+    size_t offset = 0;
+    int written;
+
     // Load image from disk
     struct clip_image_u8 *img0 = clip_image_u8_make();
     if (!clip_image_load_from_file(img->entry->path, img0)) {
@@ -199,41 +312,50 @@ int process_img(image_ctx_t *img) {
     clip_image_u8_free(img0);
     clip_image_f32_free(img_res);
 
-    size_t cap =
-        (size_t)vec_dim * 64 + 16; // generous, safe upper bound per value
-    embedding_str = malloc(cap);
-    if (!embedding_str) {
-      Errnof(E_CRIT, "malloc failed for embedding_str (%d dims)", vec_dim);
+    written = snprintf(embedding_str + offset, EMBED_STR_MAX - offset, "[");
+    if (written < 0 || (size_t)written >= EMBED_STR_MAX - offset) {
+      Errorf(E_CRIT,
+             "failed to format embedding vector for '%s' (buffer too small)",
+             img->entry->path);
 #if !defined(DEBUG)
-      fprintf(stderr, "wallclip: out of memory processing '%s'\n",
+      fprintf(stderr, "wallclip: failed to format embedding vector for '%s'\n",
               img->entry->path);
 #endif
       free(mime_type);
       return -1;
     }
-
-    size_t used = 0;
-    int n = snprintf(embedding_str + used, cap - used, "[");
-    used += n;
+    offset += written;
 
     for (int i = 0; i < vec_dim; i++) {
-      n = snprintf(embedding_str + used, cap - used, "%f%s", img_vec[i],
-                   (i < vec_dim - 1) ? "," : "");
-      if (n < 0 || (size_t)n >= cap - used) {
-        Errorf(E_CRIT, "embedding string truncated/overflowed for '%s'",
+      written = snprintf(embedding_str + offset, EMBED_STR_MAX - offset,
+                         "%s%.6f", (i == 0) ? "" : ",", img_vec[i]);
+      if (written < 0 || (size_t)written >= EMBED_STR_MAX - offset) {
+        Errorf(E_CRIT,
+               "failed to format embedding vector for '%s' (buffer too small)",
                img->entry->path);
 #if !defined(DEBUG)
         fprintf(stderr,
-                "wallclip: internal error building embedding for '%s'\n",
+                "wallclip: failed to format embedding vector for '%s'\n",
                 img->entry->path);
 #endif
-        free(embedding_str);
         free(mime_type);
         return -1;
       }
-      used += n;
+      offset += written;
     }
-    snprintf(embedding_str + used, cap - used, "]");
+
+    written = snprintf(embedding_str + offset, EMBED_STR_MAX - offset, "]");
+    if (written < 0 || (size_t)written >= EMBED_STR_MAX - offset) {
+      Errorf(E_CRIT,
+             "failed to format embedding vector for '%s' (buffer too small)",
+             img->entry->path);
+#if !defined(DEBUG)
+      fprintf(stderr, "wallclip: failed to format embedding vector for '%s'\n",
+              img->entry->path);
+#endif
+      free(mime_type);
+      return -1;
+    }
   }
 
   {
@@ -260,7 +382,6 @@ int process_img(image_ctx_t *img) {
 #endif
       free(path_copy1);
       free(path_copy2);
-      free(embedding_str);
       free(mime_type);
       return -1;
     }
@@ -277,7 +398,6 @@ int process_img(image_ctx_t *img) {
 #endif
       free(path_copy1);
       free(path_copy2);
-      free(embedding_str);
       free(mime_type);
       return -1;
     }
@@ -293,7 +413,6 @@ int process_img(image_ctx_t *img) {
 #endif
       free(path_copy1);
       free(path_copy2);
-      free(embedding_str);
       free(mime_type);
       return -1;
     }
@@ -312,7 +431,6 @@ int process_img(image_ctx_t *img) {
       free(path_copy1);
       free(path_copy2);
       free(thumbnail);
-      free(embedding_str);
       free(mime_type);
       return -1;
     }
@@ -346,7 +464,6 @@ int process_img(image_ctx_t *img) {
       magick_err = (char *)MagickRelinquishMemory(magick_err);
       magick_wand = DestroyMagickWand(magick_wand);
       free(thumbnail);
-      free(embedding_str);
       free(mime_type);
       free(path_copy1);
       free(path_copy2);
@@ -382,7 +499,6 @@ int process_img(image_ctx_t *img) {
         free(path_copy2);
         free(fname_noext);
         free(thumbnail);
-        free(embedding_str);
         free(mime_type);
         return -1;
       }
@@ -402,7 +518,6 @@ int process_img(image_ctx_t *img) {
       free(path_copy2);
       free(fname_noext);
       free(thumbnail);
-      free(embedding_str);
       free(mime_type);
       return -1;
     }
@@ -418,7 +533,6 @@ int process_img(image_ctx_t *img) {
       magick_err = (char *)MagickRelinquishMemory(magick_err);
       magick_wand = DestroyMagickWand(magick_wand);
       free(thumbnail);
-      free(embedding_str);
       free(mime_type);
       free(path_copy1);
       free(path_copy2);
@@ -444,7 +558,6 @@ int process_img(image_ctx_t *img) {
 #endif
       free(mime_type);
       free(thumbnail);
-      free(embedding_str);
       return -1;
     }
     char *title_raw = basename(path_copy);
@@ -461,7 +574,6 @@ int process_img(image_ctx_t *img) {
 #endif
       free(mime_type);
       free(thumbnail);
-      free(embedding_str);
       return -1;
     }
   }
@@ -477,7 +589,6 @@ int process_img(image_ctx_t *img) {
     free(title);
     free(mime_type);
     free(thumbnail);
-    free(embedding_str);
     return -1;
   }
 
@@ -515,7 +626,6 @@ int process_img(image_ctx_t *img) {
       free(title);
       free(mime_type);
       free(thumbnail);
-      free(embedding_str);
       return -1;
     }
 
@@ -550,7 +660,6 @@ int process_img(image_ctx_t *img) {
           free(title);
           free(mime_type);
           free(thumbnail);
-          free(embedding_str);
           return -1;
         }
         snprintf(new_slug, base_len + 16, "%s-%d", slug, max_n);
@@ -597,7 +706,6 @@ int process_img(image_ctx_t *img) {
       free(slug);
       free(title);
       free(thumbnail);
-      free(embedding_str);
       free(mime_type);
       return -1;
     }
@@ -605,7 +713,6 @@ int process_img(image_ctx_t *img) {
     free(slug);
     free(title);
     free(thumbnail);
-    free(embedding_str);
     free(mime_type);
     return 0;
   }
@@ -638,6 +745,7 @@ void file_list_free(file_list_t *list) {
 }
 
 int main(int argc, char *argv[]) {
+  bool is_query = 0;
   file_list_t *file_list = file_list_new(argc - 1);
   file_list_t *file_list_failures = file_list_new(argc - 1);
   file_list_t *file_list_duplicates = file_list_new(argc - 1);
@@ -645,6 +753,10 @@ int main(int argc, char *argv[]) {
     exit(EXIT_FAILURE);
 
   for (int i = 1; i < argc; i++) {
+    if (strcmp(argv[i], "-q") == 0 || strcmp(argv[i], "--query") == 0) {
+      is_query = 1;
+      goto common;
+    }
     struct stat st;
     if (stat(argv[i], &st) != 0) {
       Errnof(E_FAIL, "%s: does not exist", argv[i]);
@@ -683,12 +795,15 @@ int main(int argc, char *argv[]) {
     }
   }
 
+common:
   PGconn *conn = PQconnectdb(conninfo);
   if (PQstatus(conn) != CONNECTION_OK) {
     Errorf(E_FAIL, "connection failed: %s", PQerrorMessage(conn));
     PQfinish(conn);
     Errorf(E_CRIT, "Failed to make postgresql db connection.");
     file_list_free(file_list);
+    file_list_free(file_list_failures);
+    file_list_free(file_list_duplicates);
     return 1;
   }
 
@@ -698,6 +813,15 @@ int main(int argc, char *argv[]) {
     PQfinish(conn);
     file_list_free(file_list);
     exit(EXIT_FAILURE);
+  }
+
+  int rc;
+  if (is_query == 1) {
+    rc = query(argv[2], clip_ctx, conn);
+    file_list_free(file_list);
+    file_list_free(file_list_failures);
+    file_list_free(file_list_duplicates);
+    return rc;
   }
 
   int failures = 0;
