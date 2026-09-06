@@ -746,6 +746,7 @@ void file_list_free(file_list_t *list) {
 
 int main(int argc, char *argv[]) {
   bool is_query = 0;
+  char *query_str = NULL;
   file_list_t *file_list = file_list_new(argc - 1);
   file_list_t *file_list_failures = file_list_new(argc - 1);
   file_list_t *file_list_duplicates = file_list_new(argc - 1);
@@ -754,7 +755,15 @@ int main(int argc, char *argv[]) {
 
   for (int i = 1; i < argc; i++) {
     if (strcmp(argv[i], "-q") == 0 || strcmp(argv[i], "--query") == 0) {
+      if (i + 1 >= argc) {
+        fprintf(stderr, "wallclip: %s requires an argument\n", argv[i]);
+        file_list_free(file_list);
+        file_list_free(file_list_failures);
+        file_list_free(file_list_duplicates);
+        exit(EXIT_FAILURE);
+      }
       is_query = 1;
+      query_str = argv[i + 1];
       goto common;
     }
     struct stat st;
@@ -817,7 +826,7 @@ common:
 
   int rc;
   if (is_query == 1) {
-    rc = query(argv[2], clip_ctx, conn);
+    rc = query(query_str, clip_ctx, conn);
     file_list_free(file_list);
     file_list_free(file_list_failures);
     file_list_free(file_list_duplicates);
