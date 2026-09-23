@@ -17,7 +17,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 typedef struct {
@@ -38,6 +40,57 @@ typedef struct {
   PGconn *conn;
 } image_ctx_t;
 
+int create_socket() {
+  struct sockaddr_un addr;
+  memset(&addr, 0, sizeof(addr));
+
+  if (strlen(socket_path) >= sizeof(addr.sun_path)) {
+    Errorf(E_CRIT, "socket path too long");
+    return -1;
+  }
+
+  char socket_dir[PATH_MAX];
+  strncpy(socket_dir, socket_path, sizeof(socket_dir) - 1);
+  socket_dir[sizeof(socket_dir) - 1] = '\0';
+  mkdir(dirname(socket_dir), 0700);
+
+  addr.sun_family = AF_UNIX;
+  strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
+
+  int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+  if (fd < 0) {
+    Errnof(E_CRIT, "socket() failed");
+    return -1;
+  }
+
+  unlink(socket_path); // clear stale socket
+
+  if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+    Errnof(E_CRIT, "bind() failed");
+    close(fd);
+    return -1;
+  }
+
+  if (listen(fd, SOMAXCONN) < 0) {
+    Errnof(E_CRIT, "listen() failed");
+    close(fd);
+    return -1;
+  }
+
+  while (1) {
+    int client_fd = accept(fd, NULL, NULL);
+    if (client_fd < 0) {
+      if (errno == EINTR)
+        continue;
+      break;
+    }
+    // todo: client handling
+    close(client_fd);
+  }
+
+  close(fd);
+  return 0;
+}
 
 int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn) {
   char embedding_str[EMBED_STR_MAX];
@@ -752,6 +805,23 @@ int main(int argc, char *argv[]) {
   file_list_t *file_list_duplicates = file_list_new(argc - 1);
   if (!file_list || !file_list_failures || !file_list_duplicates)
     exit(EXIT_FAILURE);
+
+  if (argc == 1) {
+    if (create_socket() > 0) {
+      Errorf(E_CRIT, "Failed to create socket.");
+#if !defined(DEBUG)
+      fprintf(stderr, "wallclip: Failed to create socket.");
+#endif
+      file_list_free(file_list);
+      file_list_free(file_list_failures);
+      file_list_free(file_list_duplicates);
+      return 1;
+    }
+    file_list_free(file_list);
+    file_list_free(file_list_failures);
+    file_list_free(file_list_duplicates);
+    return 0;
+  }
 
   for (int i = 1; i < argc; i++) {
     if (strcmp(argv[i], "-q") == 0 || strcmp(argv[i], "--query") == 0) {
