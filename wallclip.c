@@ -143,12 +143,12 @@ int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn) {
   }
 
   // Compare embedding_str with pg database embeddings and get thumbnail paths
-  const char *paramValues[1] = {embedding_str};
+  const char *param_values[1] = {embedding_str};
   const char *sql = "SELECT thumbnail FROM wallpapers "
                     "WHERE 1 - (embedding <=> $1::vector(512)) > 0.27 "
                     "ORDER BY embedding <=> $1::vector(512)";
 
-  PGresult *res = PQexecParams(conn, sql, 1, NULL, paramValues, NULL, NULL, 0);
+  PGresult *res = PQexecParams(conn, sql, 1, NULL, param_values, NULL, NULL, 0);
   if (PQresultStatus(res) != PGRES_TUPLES_OK) {
     Errorf(E_FAIL, "similarity query failed: %s", PQerrorMessage(conn));
     clip_tokens_free(&tokens);
@@ -298,16 +298,16 @@ int process_img(image_ctx_t *img) {
 
   // deduplication check using checksum
   {
-    const char *paramValues[1];
-    int paramLengths[1];
-    int paramFormats[1];
+    const char *param_values[1];
+    int param_lengths[1];
+    int param_formats[1];
 
-    paramValues[0] = (const char *)md;
-    paramLengths[0] = 32;
-    paramFormats[0] = 1; // binary
+    param_values[0] = (const char *)md;
+    param_lengths[0] = 32;
+    param_formats[0] = 1; // binary
     PGresult *res =
         PQexecParams(img->conn, "SELECT 1 FROM wallpapers WHERE checksum = $1",
-                     1, NULL, paramValues, paramLengths, paramFormats, 0);
+                     1, NULL, param_values, param_lengths, param_formats, 0);
     if (PQntuples(res) > 0) {
       PQclear(res);
       free(mime_type);
@@ -730,13 +730,13 @@ int process_img(image_ctx_t *img) {
     snprintf(width_str, sizeof(width_str), "%zu", width);
     snprintf(height_str, sizeof(height_str), "%zu", height);
 
-    const char *paramValues[11] = {
+    const char *param_values[11] = {
         title,     slug,          img->entry->path, thumbnail,
         mime_type, fsize_str,     width_str,        height_str,
         md,        embedding_str, created_str,
     };
-    int paramLengths[11] = {0, 0, 0, 0, 0, 0, 0, 0, 32, 0, 0};
-    int paramFormats[11] = {0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0}; // md is binary
+    int param_lengths[11] = {0, 0, 0, 0, 0, 0, 0, 0, 32, 0, 0};
+    int param_formats[11] = {0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0}; // md is binary
 
     const char *insert =
         "INSERT INTO wallpapers "
@@ -745,8 +745,8 @@ int process_img(image_ctx_t *img) {
         "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)";
 
     PGresult *res_insert =
-        PQexecParams(img->conn, insert, 11, NULL, paramValues, paramLengths,
-                     paramFormats, 0);
+        PQexecParams(img->conn, insert, 11, NULL, param_values, param_lengths,
+                     param_formats, 0);
 
     if (PQresultStatus(res_insert) != PGRES_COMMAND_OK) {
       Errorf(E_FAIL, "insert failed for '%s': %s", img->entry->path,
