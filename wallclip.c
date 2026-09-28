@@ -737,9 +737,9 @@ int main(int argc, char *argv[]) {
 		}
 
 		struct stat st;
-		if (stat(argv[i], &st) < 0) {
-			Errnof(E_FAIL, "%s: does not exist", argv[i]);
-			rc = errno;
+		rc = stat(argv[i], &st);
+		if (rc < 0) {
+			Errnof(E_FAIL, "%s", argv[i]);
 			goto cleanup;
 		}
 
