@@ -712,7 +712,7 @@ int main(int argc, char *argv[]) {
 		struct file_entry *e = &file_list->entries[i - 1];
 		char *resolved_path = realpath(argv[i], NULL);
 		if (!resolved_path) {
-			Errorf(E_FAIL, "Failed to resolve path for %s", argv[i]);
+			Errnof(E_FAIL, "%s:", argv[i]);
 			goto cleanup;
 		}
 		e->path = resolved_path;
