@@ -1,6 +1,6 @@
 #define _GNU_SOURCE // needed for statx()
 #include "wallclip.h"
-#include "../logging/log.h"
+#include "log.h"
 #include <MagickWand/MagickWand.h>
 #include <clip.h>
 #include <ctype.h>
