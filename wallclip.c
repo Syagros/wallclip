@@ -112,7 +112,7 @@ int create_socket() {
 }
 
 int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn) {
-	int rc = 0;
+	int rc = -1;
 	int n_matches = 0;
 	char embedding_str[EMBED_STR_MAX];
 	struct image_ctx img;
@@ -134,7 +134,6 @@ int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn) {
 	written = snprintf(embedding_str + offset, EMBED_STR_MAX - offset, "[");
 	if (written < 0 || (size_t)written >= EMBED_STR_MAX - offset) {
 		Errorf(E_CRIT, "Failed to format embedding vector (buffer too small)");
-		rc = -1;
 		goto cleanup;
 	}
 	offset += written;
@@ -144,7 +143,6 @@ int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn) {
 				(i == 0) ? "" : ",", vec[i]);
 		if (written < 0 || (size_t)written >= EMBED_STR_MAX - offset) {
 			Errorf(E_CRIT, "Failed to format embedding vector (buffer too small)");
-			rc = -1;
 			goto cleanup;
 		}
 		offset += written;
@@ -153,7 +151,6 @@ int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn) {
 	written = snprintf(embedding_str + offset, EMBED_STR_MAX - offset, "]");
 	if (written < 0 || (size_t)written >= EMBED_STR_MAX - offset) {
 		Errorf(E_CRIT, "Failed to format embedding vector (buffer too small)");
-		rc = -1;
 		goto cleanup;
 	}
 
@@ -166,7 +163,6 @@ int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn) {
 	PGresult *res = PQexecParams(conn, sql, 1, NULL, param_values, NULL, NULL, 0);
 	if (PQresultStatus(res) != PGRES_TUPLES_OK) {
 		Errorf(E_FAIL, "similarity query failed: %s", PQerrorMessage(conn));
-		rc = -1;
 		goto cleanup;
 	}
 
@@ -176,14 +172,12 @@ int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn) {
 		match = calloc(n_matches, sizeof(char *));
 		if (!match) {
 			Errnof(E_CRIT, "calloc failed for match array");
-			rc = -1;
 			goto cleanup;
 		}
 		for (int i = 0; i < n_matches; i++) {
 			match[i] = strdup(PQgetvalue(res, i, 0));
 			if (!match[i]) {
 				Errnof(E_CRIT, "strdup failed for matched thumbnail path");
-				rc = -1;
 				goto cleanup;
 			}
 		}
@@ -193,6 +187,7 @@ int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn) {
 		printf("%s\n", match[i]);
 	}
 
+	rc = 0;
 cleanup:
 	for (int i = 0; i < n_matches; i++) {
 		free(match[i]);
@@ -205,7 +200,7 @@ cleanup:
 }
 
 int process_img(struct image_ctx *img) {
-	int rc = 0;
+	int rc = -1;
 	char md[32];
 	char embedding_str[EMBED_STR_MAX];
 	unsigned int md_len;
@@ -233,7 +228,6 @@ int process_img(struct image_ctx *img) {
 		f = fopen(img->entry->path, "rb");
 		if (!f) {
 			Errnof(E_FAIL, "fopen failed for '%s'", img->entry->path);
-			rc = -1;
 			goto cleanup;
 		}
 
@@ -244,7 +238,6 @@ int process_img(struct image_ctx *img) {
 		img_buf = malloc(size_f);
 		if (!img_buf || fread(img_buf, 1, size_f, f) != size_f) {
 			Errorf(E_FAIL, "failed to read '%s'", img->entry->path);
-			rc = -1;
 			goto cleanup;
 		}
 		fclose(f);
@@ -253,20 +246,17 @@ int process_img(struct image_ctx *img) {
 		if (!EVP_Digest(img_buf, size_f, (unsigned char *)md, &md_len, EVP_sha256(),
 					NULL)) {
 			Errorf(E_FAIL, "EVP_Digest failed for '%s'", img->entry->path);
-			rc = -1;
 			goto cleanup;
 		}
 
 		mime = magic_open(MAGIC_MIME_TYPE);
 		if (!mime) {
 			Errorf(E_FAIL, "magic_open failed for '%s'", img->entry->path);
-			rc = -1;
 			goto cleanup;
 		}
 		if (magic_load(mime, NULL) != 0) {
 			Errorf(E_FAIL, "magic_load failed for '%s': %s", img->entry->path,
 					magic_error(mime));
-			rc = -1;
 			goto cleanup;
 		}
 
@@ -274,7 +264,6 @@ int process_img(struct image_ctx *img) {
 		if (!mime_result) {
 			Errorf(E_FAIL, "magic_file failed for '%s': %s", img->entry->path,
 					magic_error(mime));
-			rc = -1;
 			goto cleanup;
 		}
 
@@ -287,7 +276,6 @@ int process_img(struct image_ctx *img) {
 		img_buf = NULL;
 		if (!mime_type) {
 			Errnof(E_CRIT, "strdup failed for mime_type");
-			rc = -1;
 			goto cleanup;
 		}
 	}
@@ -307,7 +295,6 @@ int process_img(struct image_ctx *img) {
 		if (PQresultStatus(res) != PGRES_TUPLES_OK) {
 			Errorf(E_FAIL, "duplicate check failed for '%s': %s",
 					img->entry->path, PQerrorMessage(img->conn));
-			rc = -1;
 			goto cleanup;
 		}
 		if (PQntuples(res) > 0) {
@@ -329,21 +316,18 @@ int process_img(struct image_ctx *img) {
 		img0 = clip_image_u8_make();
 		if (!clip_image_load_from_file(img->entry->path, img0)) {
 			Errnof(E_FAIL, "failed to load image from '%s'", img->entry->path);
-			rc = -1;
 			goto cleanup;
 		}
 		// Preprocess image
 		img_res = clip_image_f32_make();
 		if (!clip_image_preprocess(img->clip_ctx, img0, img_res)) {
 			Errorf(E_FAIL, "failed to preprocess image '%s'", img->entry->path);
-			rc = -1;
 			goto cleanup;
 		}
 		// Encode image
 		float img_vec[vec_dim];
 		if (!clip_image_encode(img->clip_ctx, 4, img_res, img_vec, true)) {
 			Errorf(E_FAIL, "failed to encode image '%s'", img->entry->path);
-			rc = -1;
 			goto cleanup;
 		}
 		clip_image_u8_free(img0);
@@ -356,7 +340,6 @@ int process_img(struct image_ctx *img) {
 			Errorf(E_CRIT,
 					"failed to format embedding vector for '%s' (buffer too small)",
 					img->entry->path);
-			rc = -1;
 			goto cleanup;
 		}
 		offset += written;
@@ -368,7 +351,6 @@ int process_img(struct image_ctx *img) {
 				Errorf(E_CRIT,
 						"failed to format embedding vector for '%s' (buffer too small)",
 						img->entry->path);
-				rc = -1;
 				goto cleanup;
 			}
 			offset += written;
@@ -379,7 +361,6 @@ int process_img(struct image_ctx *img) {
 			Errorf(E_CRIT,
 					"failed to format embedding vector for '%s' (buffer too small)",
 					img->entry->path);
-			rc = -1;
 			goto cleanup;
 		}
 	}
@@ -402,7 +383,6 @@ int process_img(struct image_ctx *img) {
 		path_copy2 = strdup(img->entry->path);
 		if (!path_copy1 || !path_copy2) {
 			Errnof(E_CRIT, "strdup failed for path");
-			rc = -1;
 			goto cleanup;
 		}
 		char *fname = basename(path_copy1);
@@ -412,7 +392,6 @@ int process_img(struct image_ctx *img) {
 		snprintf(thumb_dir, sizeof(thumb_dir), "%s/.thumbnails", fdir);
 		if (mkdir(thumb_dir, 0755) != 0 && errno != EEXIST) {
 			Errnof(E_FAIL, "mkdir failed for '%s'", thumb_dir);
-			rc = -1;
 			goto cleanup;
 		}
 
@@ -421,7 +400,6 @@ int process_img(struct image_ctx *img) {
 		thumbnail = malloc(thumb_len);
 		if (!thumbnail) {
 			Errnof(E_CRIT, "malloc failed for thumbnail path");
-			rc = -1;
 			goto cleanup;
 		}
 		// Thumbnails are always re-encoded as JPEG below (MagickSetImageFormat),
@@ -432,7 +410,6 @@ int process_img(struct image_ctx *img) {
 		fname_noext = strdup(fname);
 		if (!fname_noext) {
 			Errnof(E_CRIT, "strdup failed building thumbnail path");
-			rc = -1;
 			goto cleanup;
 		}
 		char *base_ext = strrchr(fname_noext, '.');
@@ -460,7 +437,6 @@ int process_img(struct image_ctx *img) {
 			Errorf(E_FAIL, "MagickReadImage failed for '%s': %s", img->entry->path,
 					magick_err);
 			magick_err = (char *)MagickRelinquishMemory(magick_err);
-			rc = -1;
 			goto cleanup;
 		}
 
@@ -484,7 +460,6 @@ int process_img(struct image_ctx *img) {
 				Errorf(E_FAIL, "MagickResizeImage failed for '%s': %s",
 						img->entry->path, magick_err);
 				magick_err = (char *)MagickRelinquishMemory(magick_err);
-				rc = -1;
 				goto cleanup;
 			}
 		}
@@ -495,7 +470,6 @@ int process_img(struct image_ctx *img) {
 			Errorf(E_FAIL, "MagickSetImageFormat failed for '%s': %s",
 					img->entry->path, magick_err);
 			magick_err = (char *)MagickRelinquishMemory(magick_err);
-			rc = -1;
 			goto cleanup;
 		}
 
@@ -505,7 +479,6 @@ int process_img(struct image_ctx *img) {
 			Errorf(E_FAIL, "MagickWriteImages failed for '%s': %s", img->entry->path,
 					magick_err);
 			magick_err = (char *)MagickRelinquishMemory(magick_err);
-			rc = -1;
 			goto cleanup;
 		}
 		magick_wand = DestroyMagickWand(magick_wand);
@@ -524,7 +497,6 @@ int process_img(struct image_ctx *img) {
 		char *path_copy = strdup(img->entry->path);
 		if (!path_copy) {
 			Errnof(E_CRIT, "strdup failed building title");
-			rc = -1;
 			goto cleanup;
 		}
 		char *title_raw = basename(path_copy);
@@ -535,7 +507,6 @@ int process_img(struct image_ctx *img) {
 		free(path_copy);
 		if (!title) {
 			Errnof(E_CRIT, "strdup failed building title");
-			rc = -1;
 			goto cleanup;
 		}
 	}
@@ -544,7 +515,6 @@ int process_img(struct image_ctx *img) {
 	slug = malloc(title_len + 1);
 	if (!slug) {
 		Errnof(E_CRIT, "malloc failed for slug");
-		rc = -1;
 		goto cleanup;
 	}
 
@@ -573,7 +543,6 @@ int process_img(struct image_ctx *img) {
 		if (PQresultStatus(check_res) != PGRES_TUPLES_OK) {
 			Errorf(E_FAIL, "slug collision query failed for '%s': %s",
 					img->entry->path, PQerrorMessage(img->conn));
-			rc = -1;
 			goto cleanup;
 		}
 
@@ -599,7 +568,6 @@ int process_img(struct image_ctx *img) {
 				char *new_slug = malloc(base_len + 16);
 				if (!new_slug) {
 					Errnof(E_CRIT, "malloc failed building unique slug");
-					rc = -1;
 					goto cleanup;
 				}
 				snprintf(new_slug, base_len + 16, "%s-%d", slug, max_n);
@@ -638,11 +606,11 @@ int process_img(struct image_ctx *img) {
 		if (PQresultStatus(res_insert) != PGRES_COMMAND_OK) {
 			Errorf(E_FAIL, "insert failed for '%s': %s", img->entry->path,
 					PQresultErrorMessage(res_insert));
-			rc = -1;
 			goto cleanup;
 		}
 	}
 
+	rc = 0;
 cleanup:
 	if (f)
 		fclose(f);
@@ -701,7 +669,7 @@ void file_list_free(struct file_list *list) {
 }
 
 int main(int argc, char *argv[]) {
-	int rc = 0;
+	int rc = -1;
 	bool is_query = 0;
 	char *query_str = NULL;
 	PGconn *conn = NULL;
@@ -715,7 +683,6 @@ int main(int argc, char *argv[]) {
 	if (argc == 1) {
 		if (create_socket() < 0) { 
 			Errorf(E_CRIT, "Failed to create socket.");
-			rc = -1;
 			goto cleanup;
 		}
 		goto cleanup;
@@ -725,7 +692,6 @@ int main(int argc, char *argv[]) {
 		if (strcmp(argv[i], "-q") == 0 || strcmp(argv[i], "--query") == 0) {
 			if (i + 1 >= argc) {
 				fprintf(stderr, "wallclip: %s requires an argument\n", argv[i]);
-				rc = -1;
 				goto cleanup;
 			}
 			is_query = 1;
@@ -747,7 +713,6 @@ int main(int argc, char *argv[]) {
 		char *resolved_path = realpath(argv[i], NULL);
 		if (!resolved_path) {
 			Errorf(E_FAIL, "Failed to resolve path for %s", argv[i]);
-			rc = -1;
 			goto cleanup;
 		}
 		e->path = resolved_path;
@@ -810,6 +775,7 @@ int main(int argc, char *argv[]) {
 			printf("  %s\n", file_list_duplicates->entries[i].path);
 	}
 
+	rc = 0;
 cleanup:
 	if (clip_ctx)
 		clip_free(clip_ctx);
