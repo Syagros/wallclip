@@ -40,6 +40,25 @@ struct image_ctx {
 	PGconn *conn;
 };
 
+int init_startup(PGconn **conn, struct clip_ctx **clip_ctx)
+{
+    int rc = 0;
+
+    *conn = PQconnectdb(conninfo);
+    if (PQstatus(*conn) != CONNECTION_OK) {
+        Errorf(E_FAIL, "connection failed: %s", PQerrorMessage(*conn));
+        rc = -1;
+    }
+
+    *clip_ctx = clip_model_load(CLIP_MODEL_PATH, 0);
+    if (!*clip_ctx) {
+        Errorf(E_CRIT, "failed to load clip model\n");
+        rc = -1;
+    }
+
+    return rc;
+}
+
 int create_socket() {
 	struct sockaddr_un addr;
 	memset(&addr, 0, sizeof(addr));
@@ -711,12 +730,16 @@ int main(int argc, char *argv[]) {
 			}
 			is_query = 1;
 			query_str = argv[i + 1];
-			goto common;
+			rc = init_startup(&conn, &clip_ctx);
+			if (rc < 0)
+				goto cleanup;
+			break;
 		}
+
 		struct stat st;
-		if (stat(argv[i], &st) != 0) {
+		if (stat(argv[i], &st) < 0) {
 			Errnof(E_FAIL, "%s: does not exist", argv[i]);
-			rc = -1;
+			rc = errno;
 			goto cleanup;
 		}
 
@@ -739,21 +762,6 @@ int main(int argc, char *argv[]) {
 			e->created_at = e->modified_at; /* fallback for when filesystem doesn't
 											   support birth time. */
 		}
-	}
-
-common:
-	conn = PQconnectdb(conninfo);
-	if (PQstatus(conn) != CONNECTION_OK) {
-		Errorf(E_FAIL, "connection failed: %s", PQerrorMessage(conn));
-		rc = 1;
-		goto cleanup;
-	}
-
-	clip_ctx = clip_model_load(CLIP_MODEL_PATH, 0);
-	if (!clip_ctx) {
-		fprintf(stderr, "failed to load clip model\n");
-		rc = 1;
-		goto cleanup;
 	}
 
 	if (is_query == 1) {
