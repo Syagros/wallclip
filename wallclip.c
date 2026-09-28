@@ -716,7 +716,8 @@ int main(int argc, char *argv[]) {
 		struct stat st;
 		if (stat(argv[i], &st) != 0) {
 			Errnof(E_FAIL, "%s: does not exist", argv[i]);
-
+			rc = -1;
+			goto cleanup;
 		}
 
 		struct file_entry *e = &file_list->entries[i - 1];
