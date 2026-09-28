@@ -686,15 +686,6 @@ cleanup:
 	return NULL;
 }
 
-void file_list_free(struct file_list *list) {
-	if (!list)
-		return;
-	for (int i = 0; i < list->count; i++)
-		free(list->entries[i].path);
-	free(list->entries);
-	free(list);
-}
-
 int create_socket(void) {
 	int fd = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (fd < 0) {
@@ -832,9 +823,7 @@ int main(int argc, char *argv[]) {
 	char *sockp = strdup(socket_path);
 	struct clip_ctx *clip_ctx = NULL;
 	struct file_list *file_list = file_list_new(argc - 1);
-	struct file_list *file_list_failures = file_list_new(argc - 1);
-	struct file_list *file_list_duplicates = file_list_new(argc - 1);
-	if (!file_list || !file_list_failures || !file_list_duplicates)
+	if (!file_list)
 		goto cleanup;
 
 	for (int i = 1; !is_server && i < argc; i++) {
@@ -942,56 +931,29 @@ int main(int argc, char *argv[]) {
         goto cleanup;
     }
 
-	// track failures and duplicates
-	// TODO: Rewrite this once process_img() is split into many functions
-	int failures = 0;
-	int duplicates = 0;
-	for (int i = 0; i < file_list->count; i++) {
-		struct image_ctx img = {
-			.entry = &file_list->entries[i],
-			.clip_ctx = clip_ctx,
-			.conn = conn,
-		};
-		int rcp = process_img(&img);
-		if (rcp < 0) {
-			Errorf(E_WARN, "failed to process '%s'", file_list->entries[i].path);
-			file_list_failures->entries[failures].path = strdup(file_list->entries[i].path);
-			if (!file_list_failures->entries[failures].path) {
-				Errnof(E_CRIT, "strdup failed recording failed path");
-			}
-			failures++;
-		} else if (rcp > 0) {
-			Errorf(E_WARN, "'%s' is a duplicate, skipping", file_list->entries[i].path);
-			file_list_duplicates->entries[duplicates].path = strdup(file_list->entries[i].path);
-			if (!file_list_duplicates->entries[duplicates].path) {
-				Errnof(E_CRIT, "strdup failed recording duplicate path");
-			}
-			duplicates++;
-		}
-	}
-	file_list_failures->count = failures;
-	file_list_duplicates->count = duplicates;
+       int failed = 0;
+       struct image_ctx img = {.clip_ctx = clip_ctx, .conn = conn};
+       for (int i = 0; i < file_list->count; i++) {
+               img.entry = &file_list->entries[i];
+               int prc = process_img(&img);
+               if (prc < 0) {
+                       puts(img.entry->path);
+                       failed++;
+               }
+       }
 
-	if (failures > 0) {
-		printf("%d image(s) failed processing:\n", failures);
-		for (int i = 0; i < file_list_failures->count; i++)
-			printf("  %s\n", file_list_failures->entries[i].path);
-	}
-	if (duplicates > 0) {
-		printf("%d image(s) skipped as duplicates:\n", duplicates);
-		for (int i = 0; i < file_list_duplicates->count; i++)
-			printf("  %s\n", file_list_duplicates->entries[i].path);
-	}
-
-	rc = 0;
+       rc = failed ? 1 : 0;
 cleanup:
 	free(sockp);
 	if (clip_ctx)
 		clip_free(clip_ctx);
 	if (conn)
 		PQfinish(conn);
-	file_list_free(file_list);
-	file_list_free(file_list_failures);
-	file_list_free(file_list_duplicates);
+	if (file_list) {
+		for (int i = 0; i < file_list->count; i++)
+			free(file_list->entries[i].path);
+		free(file_list->entries);
+		free(file_list);
+	}
 	return rc;
 }
