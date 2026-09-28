@@ -20,6 +20,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
+#include <signal.h>
 #include <unistd.h>
 
 struct file_entry {
@@ -40,7 +41,7 @@ struct image_ctx {
 	PGconn *conn;
 };
 
-int init_startup(PGconn **conn, struct clip_ctx **clip_ctx)
+int init_setup(PGconn **conn, struct clip_ctx **clip_ctx)
 {
 	int rc = 0;
 
@@ -59,67 +60,18 @@ int init_startup(PGconn **conn, struct clip_ctx **clip_ctx)
 	return rc;
 }
 
-int create_socket() {
-	struct sockaddr_un addr;
-	memset(&addr, 0, sizeof(addr));
-
-	if (strlen(socket_path) >= sizeof(addr.sun_path)) {
-		Errorf(E_CRIT, "socket path too long");
-		return -1;
-	}
-
-	char socket_dir[PATH_MAX];
-	strncpy(socket_dir, socket_path, sizeof(socket_dir) - 1);
-	socket_dir[sizeof(socket_dir) - 1] = '\0';
-	mkdir(dirname(socket_dir), 0700);
-
-	addr.sun_family = AF_UNIX;
-	strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
-
-	int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-	if (fd < 0) {
-		Errnof(E_CRIT, "socket() failed");
-		return -1;
-	}
-
-	unlink(socket_path); // clear stale socket
-
-	if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-		Errnof(E_CRIT, "bind() failed");
-		close(fd);
-		return -1;
-	}
-
-	if (listen(fd, SOMAXCONN) < 0) {
-		Errnof(E_CRIT, "listen() failed");
-		close(fd);
-		return -1;
-	}
-
-	while (1) {
-		int client_fd = accept(fd, NULL, NULL);
-		if (client_fd < 0) {
-			if (errno == EINTR)
-				continue;
-			break;
-		}
-		// todo: client handling
-		close(client_fd);
-	}
-
-	close(fd);
-	return 0;
-}
-
-int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn) {
-	int rc = -1;
-	int n_matches = 0;
-	char embedding_str[EMBED_STR_MAX];
-	struct image_ctx img;
-	img.clip_ctx = clip_ctx;
-	img.conn = conn;
-	size_t offset = 0;
-	int written;
+int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn,
+        char ***out_matches, int *out_count) {
+    int rc = -1;
+    char embedding_str[EMBED_STR_MAX];
+    struct image_ctx img;
+    img.clip_ctx = clip_ctx;
+    img.conn = conn;
+    size_t offset = 0;
+    int written;
+    PGresult *res = NULL;
+    char **match = NULL;
+    int n_matches = 0;
 
 	// Tokenize text
 	struct clip_tokens tokens;
@@ -160,14 +112,13 @@ int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn) {
 		"WHERE 1 - (embedding <=> $1::vector(512)) > 0.27 "
 		"ORDER BY embedding <=> $1::vector(512)";
 
-	PGresult *res = PQexecParams(conn, sql, 1, NULL, param_values, NULL, NULL, 0);
+	res = PQexecParams(conn, sql, 1, NULL, param_values, NULL, NULL, 0);
 	if (PQresultStatus(res) != PGRES_TUPLES_OK) {
 		Errorf(E_FAIL, "similarity query failed: %s", PQerrorMessage(conn));
 		goto cleanup;
 	}
 
 	n_matches = PQntuples(res);
-	char **match = NULL;
 	if (n_matches > 0) {
 		match = calloc(n_matches, sizeof(char *));
 		if (!match) {
@@ -183,17 +134,17 @@ int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn) {
 		}
 	}
 
-	for (int i = 0; i < n_matches; i++) {
-		printf("%s\n", match[i]);
-	}
+    *out_matches = match; // may be NULL if n_matches == 0
+    *out_count = n_matches;
+    match = NULL; // ownership transferred to caller
+    rc = 0;
 
-	rc = 0;
 cleanup:
-	for (int i = 0; i < n_matches; i++) {
-		free(match[i]);
-	}
-	if(match)
+	if (match) {
+		for (int i = 0; i < n_matches; i++)
+			free(match[i]);
 		free(match);
+	}
 	clip_tokens_free(&tokens);
 	PQclear(res);
 	return rc;
@@ -668,44 +619,161 @@ void file_list_free(struct file_list *list) {
 	free(list);
 }
 
+int create_socket(void) {
+	int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (fd < 0) {
+		Errnof(E_CRIT, "socket() failed");
+		return -1;
+	}
+	return fd;
+}
+
+int bind_socket(int fd, char *socket_path) {
+	int rc = -1;
+	struct sockaddr_un addr;
+	memset(&addr, 0, sizeof(addr));
+
+	if (strlen(socket_path) >= sizeof(addr.sun_path)) {
+		Errorf(E_CRIT, "socket path too long");
+		goto cleanup;
+	}
+
+	addr.sun_family = AF_UNIX;
+	strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
+
+	unlink(socket_path); // clear stale socket
+
+	if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+		Errnof(E_CRIT, "bind() failed");
+		goto cleanup;
+	}
+
+	rc = 0;
+
+cleanup:
+	if (rc != 0)
+		close(fd);
+	return rc;
+}
+
+int listen_socket(int fd) {
+	int rc = -1;
+
+	if (listen(fd, SOMAXCONN) < 0) {
+		Errnof(E_CRIT, "listen() failed");
+		goto cleanup;
+	}
+
+	rc = 0;
+
+cleanup:
+	if (rc != 0)
+		close(fd);
+	return rc;
+}
+
+// Accept loop: read a query string from each client, run it, write matching
+// paths back (one line, delimetered.)
+// Returns when accept() fails for a reason other than EINTR
+int serve_queries(int fd, struct clip_ctx *clip_ctx, PGconn *conn) {
+	signal(SIGPIPE, SIG_IGN);
+
+	while (1) {
+		int client_fd = accept(fd, NULL, NULL);
+		if (client_fd < 0) {
+			if (errno == EINTR)
+				continue;
+			break;
+		}
+
+		char read_buffer[4096];
+		char **matches = NULL;
+		int count = 0;
+
+		ssize_t rc = read(client_fd, read_buffer, sizeof(read_buffer) - 1);
+		if (rc < 0) {
+			Errnof(E_WARN, "read() failed");
+			goto cleanup;
+		}
+
+		read_buffer[rc] = '\0'; // rc is at most sizeof(read_buffer)-1
+		if (query(read_buffer, clip_ctx, conn, &matches, &count) == 0) {
+			for (int i = 0; i < count; i++) {
+				dprintf(client_fd, "%s\n", matches[i]);
+				free(matches[i]);
+			}
+			free(matches);
+		}
+
+cleanup:
+		close(client_fd);
+	}
+	close(fd);
+	return 0;
+}
+
+int connect_socket(int fd, const char *socket_path) {
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
+
+    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        Errnof(E_CRIT, "connect() failed");
+        return -1;
+    }
+    return 0;
+}
+
+int write_query_socket(char *query, int fd) {
+    int rc = 1;
+    char query_buf[strlen(query) + 1];
+    strcpy(query_buf, query);
+
+    // write query to server socket
+    if (write(fd, query_buf, strlen(query) + 1) < 0) {
+        Errnof(E_CRIT, "Failed to write to socket.");
+#if !defined(DEBUG)
+        fprintf(stderr, "wallclip: Failed to write to socket.");
+#endif
+        goto cleanup;
+    }
+
+    rc = 0;
+
+cleanup:
+    if (rc != 0)
+        close(fd);
+    return rc;
+}
+
 int main(int argc, char *argv[]) {
 	int rc = -1;
+	bool is_server = (argc == 1);
 	bool is_query = 0;
 	char *query_str = NULL;
 	PGconn *conn = NULL;
+	char *sockp = strdup(socket_path);
 	struct clip_ctx *clip_ctx = NULL;
 	struct file_list *file_list = file_list_new(argc - 1);
 	struct file_list *file_list_failures = file_list_new(argc - 1);
 	struct file_list *file_list_duplicates = file_list_new(argc - 1);
 	if (!file_list || !file_list_failures || !file_list_duplicates)
-		exit(EXIT_FAILURE);
-
-	if (argc == 1) {
-		if (create_socket() < 0) { 
-			Errorf(E_CRIT, "Failed to create socket.");
-			goto cleanup;
-		}
 		goto cleanup;
-	}
 
-	for (int i = 1; i < argc; i++) {
+	for (int i = 1; !is_server && i < argc; i++) {
 		if (strcmp(argv[i], "-q") == 0 || strcmp(argv[i], "--query") == 0) {
 			if (i + 1 >= argc) {
 				fprintf(stderr, "wallclip: %s requires an argument\n", argv[i]);
 				goto cleanup;
 			}
-			is_query = 1;
+			is_query = true;
 			query_str = argv[i + 1];
-			rc = init_startup(&conn, &clip_ctx);
-			if (rc < 0)
-				goto cleanup;
 			break;
 		}
-
 		struct stat st;
-		rc = stat(argv[i], &st);
-		if (rc < 0) {
-			Errnof(E_FAIL, "%s", argv[i]);
+		if (stat(argv[i], &st) != 0) {
+			Errnof(E_FAIL, "%s:", argv[i]);
 			goto cleanup;
 		}
 
@@ -729,10 +797,74 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	if (is_query == 1) {
-		rc = query(query_str, clip_ctx, conn);
+	rc = init_setup(&conn, &clip_ctx);
+	if(rc < 0)
 		goto cleanup;
+
+	if (is_server) {
+        int fd = create_socket();
+        if (fd < 0) {
+            Errorf(E_CRIT, "Failed to create socket.");
+            goto cleanup;
+        }
+        if (bind_socket(fd, sockp) < 0) {
+            fd = -1; // closed by bind_socket
+            Errorf(E_CRIT, "Failed to bind socket.");
+            goto cleanup;
+        }
+        if (listen_socket(fd) < 0) {
+            fd = -1; // closed by listen_socket
+            Errorf(E_CRIT, "Failed to create socket.");
+            goto cleanup;
+        }
+        serve_queries(fd, clip_ctx, conn);
+        fd = -1; // closed by serve_queries
+        rc = 0;
+        goto cleanup;
 	}
+
+    if (is_query) {
+        // create client socket
+        int fd = create_socket();
+        if (fd < 0) {
+            Errorf(E_CRIT, "Failed to create socket.");
+            goto cleanup;
+        }
+
+        // connect to server socket
+        if (connect_socket(fd, sockp) < 0) {
+            Errorf(E_CRIT, "Failed to connect to socket.");
+            goto cleanup;
+        }
+
+        if (write_query_socket(query_str, fd) != 0) {
+            fd = -1; // closed by write_query_socket
+            Errorf(E_CRIT, "failed to write query to socket");
+            goto cleanup;
+        }
+
+        shutdown(fd, SHUT_WR); // signal end of request
+
+        char buf[4096];
+        while (1) {
+            ssize_t n = read(fd, buf, sizeof(buf));
+            if (n == 0)
+                break; // server closed, done
+            if (n < 0) {
+                if (errno == EINTR)
+                    continue;
+                Errnof(E_CRIT, "read() from socket failed");
+                goto cleanup;
+            }
+            if (fwrite(buf, 1, (size_t)n, stdout) != (size_t)n) {
+                Errnof(E_CRIT, "fwrite to stdout failed");
+                goto cleanup;
+            }
+        }
+
+        rc = 0;
+        goto cleanup;
+    }
 
 	// track failures and duplicates
 	// TODO: Rewrite this once process_img() is split into many functions
@@ -777,6 +909,7 @@ int main(int argc, char *argv[]) {
 
 	rc = 0;
 cleanup:
+	free(sockp);
 	if (clip_ctx)
 		clip_free(clip_ctx);
 	if (conn)
