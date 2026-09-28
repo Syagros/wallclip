@@ -22,23 +22,23 @@
 #include <sys/un.h>
 #include <unistd.h>
 
-typedef struct {
+struct file_entry {
   char *path;
   size_t fsize;
   time_t created_at;
   time_t modified_at;
-} file_entry_t;
+};
 
-typedef struct {
-  file_entry_t *entries;
+struct file_list {
+  struct file_entry *entries;
   int count;
-} file_list_t;
+};
 
-typedef struct {
-  file_entry_t *entry;
+struct image_ctx {
+  struct file_entry *entry;
   struct clip_ctx *clip_ctx;
   PGconn *conn;
-} image_ctx_t;
+};
 
 int create_socket() {
   struct sockaddr_un addr;
@@ -94,7 +94,7 @@ int create_socket() {
 
 int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn) {
   char embedding_str[EMBED_STR_MAX];
-  image_ctx_t img;
+  struct image_ctx img;
   img.clip_ctx = clip_ctx;
   img.conn = conn;
   size_t offset = 0;
@@ -200,7 +200,7 @@ int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn) {
   return 0;
 }
 
-int process_img(image_ctx_t *img) {
+int process_img(struct image_ctx *img) {
   // checksum + mime type
   char md[32];
   char embedding_str[EMBED_STR_MAX];
@@ -771,8 +771,8 @@ int process_img(image_ctx_t *img) {
   }
 }
 
-file_list_t *file_list_new(size_t count) {
-  file_list_t *list = malloc(sizeof(*list));
+struct file_list *file_list_new(size_t count) {
+  struct file_list *list = malloc(sizeof(*list));
   if (!list) {
     Errnof(E_FAIL, "malloc failed");
     return NULL;
@@ -788,7 +788,7 @@ file_list_t *file_list_new(size_t count) {
   return list;
 }
 
-void file_list_free(file_list_t *list) {
+void file_list_free(struct file_list *list) {
   if (!list)
     return;
   for (int i = 0; i < list->count; i++)
@@ -800,9 +800,9 @@ void file_list_free(file_list_t *list) {
 int main(int argc, char *argv[]) {
   bool is_query = 0;
   char *query_str = NULL;
-  file_list_t *file_list = file_list_new(argc - 1);
-  file_list_t *file_list_failures = file_list_new(argc - 1);
-  file_list_t *file_list_duplicates = file_list_new(argc - 1);
+  struct file_list *file_list = file_list_new(argc - 1);
+  struct file_list *file_list_failures = file_list_new(argc - 1);
+  struct file_list *file_list_duplicates = file_list_new(argc - 1);
   if (!file_list || !file_list_failures || !file_list_duplicates)
     exit(EXIT_FAILURE);
 
@@ -848,7 +848,7 @@ int main(int argc, char *argv[]) {
       exit(EXIT_FAILURE);
     }
 
-    file_entry_t *e = &file_list->entries[i - 1];
+    struct file_entry *e = &file_list->entries[i - 1];
     char *resolved_path = realpath(argv[i], NULL);
     if (!resolved_path) {
       Errnof(E_FAIL, "realpath failed for '%s'", argv[i]);
@@ -906,7 +906,7 @@ common:
   int failures = 0;
   int duplicates = 0;
   for (int i = 0; i < file_list->count; i++) {
-    image_ctx_t img = {
+    struct image_ctx img = {
         .entry = &file_list->entries[i],
         .clip_ctx = clip_ctx,
         .conn = conn,
