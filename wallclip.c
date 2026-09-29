@@ -22,6 +22,7 @@
 #include <sys/un.h>
 #include <signal.h>
 #include <unistd.h>
+#include <getopt.h>
 
 struct file_entry {
 	char *path;
@@ -40,6 +41,28 @@ struct image_ctx {
 	struct clip_ctx *clip_ctx;
 	PGconn *conn;
 };
+
+struct option long_options[] = {
+	{ "verbose", no_argument,       0, 'v' },
+	{ "delete",  required_argument, 0, 'd' },
+	{ "query",  required_argument, 0, 'q' },
+	{ "help",  no_argument, 0, 'h' },
+	{ 0, 0, 0, 0 }
+};
+
+static void usage(FILE *out) {
+	fprintf(out,
+			"Usage:\n"
+			"  wallclip [-v]				run server in foreground\n"
+			"  wallclip [-v] FILE...			add images (space separated)\n"
+  			"wallclip [-v] -d FILE [-d FILE2 ...]	delete images (both, db and fs; repeat -d per file)\n"
+			"  wallclip [-v] -q, --query STR		query for images\n"
+			"\n"
+			"Options:\n"
+			"  -v, --verbose\n"
+			"  -d, --delete\n"
+			"  -h, --help\n");
+}
 
 int init_setup(PGconn **conn, struct clip_ctx **clip_ctx)
 {
@@ -61,17 +84,17 @@ int init_setup(PGconn **conn, struct clip_ctx **clip_ctx)
 }
 
 int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn,
-        char ***out_matches, int *out_count) {
-    int rc = -1;
-    char embedding_str[EMBED_STR_MAX];
-    struct image_ctx img;
-    img.clip_ctx = clip_ctx;
-    img.conn = conn;
-    size_t offset = 0;
-    int written;
-    PGresult *res = NULL;
-    char **match = NULL;
-    int n_matches = 0;
+		char ***out_matches, int *out_count) {
+	int rc = -1;
+	char embedding_str[EMBED_STR_MAX];
+	struct image_ctx img;
+	img.clip_ctx = clip_ctx;
+	img.conn = conn;
+	size_t offset = 0;
+	int written;
+	PGresult *res = NULL;
+	char **match = NULL;
+	int n_matches = 0;
 
 	// Tokenize text
 	struct clip_tokens tokens;
@@ -134,10 +157,10 @@ int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn,
 		}
 	}
 
-    *out_matches = match; // may be NULL if n_matches == 0
-    *out_count = n_matches;
-    match = NULL; // ownership transferred to caller
-    rc = 0;
+	*out_matches = match; // may be NULL if n_matches == 0
+	*out_count = n_matches;
+	match = NULL; // ownership transferred to caller
+	rc = 0;
 
 cleanup:
 	if (match) {
@@ -160,13 +183,13 @@ static int compute_checksum_and_mime(const char *path, size_t fsize,
 	FILE *f = NULL;
 	unsigned char *img_buf = NULL;
 	magic_t mime = NULL;
- 
+
 	f = fopen(path, "rb");
 	if (!f) {
 		Errnof(E_FAIL, "fopen failed for '%s'", path);
 		goto cleanup;
 	}
- 
+
 	img_buf = malloc(fsize);
 	if (!img_buf || fread(img_buf, 1, fsize, f) != fsize) {
 		Errorf(E_FAIL, "failed to read '%s'", path);
@@ -174,12 +197,12 @@ static int compute_checksum_and_mime(const char *path, size_t fsize,
 	}
 	fclose(f);
 	f = NULL;
- 
+
 	if (!EVP_Digest(img_buf, fsize, md_out, md_len_out, EVP_sha256(), NULL)) {
 		Errorf(E_FAIL, "EVP_Digest failed for '%s'", path);
 		goto cleanup;
 	}
- 
+
 	mime = magic_open(MAGIC_MIME_TYPE);
 	if (!mime) {
 		Errorf(E_FAIL, "magic_open failed for '%s'", path);
@@ -190,14 +213,14 @@ static int compute_checksum_and_mime(const char *path, size_t fsize,
 				magic_error(mime));
 		goto cleanup;
 	}
- 
+
 	const char *mime_result = magic_buffer(mime, img_buf, fsize);
 	if (!mime_result) {
 		Errorf(E_FAIL, "magic_file failed for '%s': %s", path,
 				magic_error(mime));
 		goto cleanup;
 	}
- 
+
 	// magic_buffer's return value is owned by the magic_t handle and becomes
 	// invalid once it is closed, so make our own copy before closing.
 	*mime_type_out = strdup(mime_result);
@@ -205,9 +228,9 @@ static int compute_checksum_and_mime(const char *path, size_t fsize,
 		Errnof(E_CRIT, "strdup failed for mime_type");
 		goto cleanup;
 	}
- 
+
 	rc = 0;
- 
+
 cleanup:
 	if (f)
 		fclose(f);
@@ -216,7 +239,7 @@ cleanup:
 		magic_close(mime);
 	return rc;
 }
- 
+
 // Checks whether an image with checksum `md` is already in the database.
 // Returns 1 if it's a duplicate, 0 if not, -1 on error.
 static int check_duplicate(PGconn *conn, const unsigned char *md,
@@ -226,7 +249,7 @@ static int check_duplicate(PGconn *conn, const unsigned char *md,
 	const char *param_values[1] = {(const char *)md};
 	int param_lengths[1] = {32};
 	int param_formats[1] = {1}; // binary
- 
+
 	res = PQexecParams(conn, "SELECT 1 FROM wallpapers WHERE checksum = $1",
 			1, NULL, param_values, param_lengths, param_formats, 0);
 	if (PQresultStatus(res) != PGRES_TUPLES_OK) {
@@ -234,14 +257,14 @@ static int check_duplicate(PGconn *conn, const unsigned char *md,
 				PQerrorMessage(conn));
 		goto cleanup;
 	}
- 
+
 	rc = (PQntuples(res) > 0) ? 1 : 0;
- 
+
 cleanup:
 	PQclear(res);
 	return rc;
 }
- 
+
 // Loads, preprocesses and CLIP-encodes the image at `path`, formatting the
 // resulting vector into `embedding_str` (of size `embedding_str_max`) as a
 // pgvector literal. Returns 0 on success, -1 on error.
@@ -252,13 +275,13 @@ static int encode_image_embedding(struct clip_ctx *clip_ctx, const char *path,
 	struct clip_image_f32 *img_res = NULL;
 	float *img_vec = NULL;
 	int vec_dim = clip_get_vision_hparams(clip_ctx)->projection_dim;
- 
+
 	img_vec = malloc(sizeof(float) * (size_t)vec_dim);
 	if (!img_vec) {
 		Errnof(E_CRIT, "malloc failed for image vector");
 		goto cleanup;
 	}
- 
+
 	img0 = clip_image_u8_make();
 	if (!clip_image_load_from_file(path, img0)) {
 		Errnof(E_FAIL, "failed to load image from '%s'", path);
@@ -273,7 +296,7 @@ static int encode_image_embedding(struct clip_ctx *clip_ctx, const char *path,
 		Errorf(E_FAIL, "failed to encode image '%s'", path);
 		goto cleanup;
 	}
- 
+
 	size_t offset = 0;
 	int written = snprintf(embedding_str, embedding_str_max, "[");
 	if (written < 0 || (size_t)written >= embedding_str_max) {
@@ -283,7 +306,7 @@ static int encode_image_embedding(struct clip_ctx *clip_ctx, const char *path,
 		goto cleanup;
 	}
 	offset += (size_t)written;
- 
+
 	for (int i = 0; i < vec_dim; i++) {
 		written = snprintf(embedding_str + offset, embedding_str_max - offset,
 				"%s%.6f", (i == 0) ? "" : ",", img_vec[i]);
@@ -295,7 +318,7 @@ static int encode_image_embedding(struct clip_ctx *clip_ctx, const char *path,
 		}
 		offset += (size_t)written;
 	}
- 
+
 	written = snprintf(embedding_str + offset, embedding_str_max - offset, "]");
 	if (written < 0 || (size_t)written >= embedding_str_max - offset) {
 		Errorf(E_CRIT,
@@ -303,9 +326,9 @@ static int encode_image_embedding(struct clip_ctx *clip_ctx, const char *path,
 				path);
 		goto cleanup;
 	}
- 
+
 	rc = 0;
- 
+
 cleanup:
 	free(img_vec);
 	if (img0)
@@ -314,7 +337,7 @@ cleanup:
 		clip_image_f32_free(img_res);
 	return rc;
 }
- 
+
 // Formats `created_at` into `out` (of size `out_size`) as a Postgres
 // timestamp string, falling back to 'now' if the conversion fails.
 static void format_created_at(time_t created_at, char *out, size_t out_size) {
@@ -325,7 +348,7 @@ static void format_created_at(time_t created_at, char *out, size_t out_size) {
 		snprintf(out, out_size, "now"); // Postgres understands 'now'
 	}
 }
- 
+
 // Creates a resized JPEG thumbnail for the image at `path` inside a
 // `.thumbnails` directory next to it, picking a free "-N" suffixed name if
 // one already exists. On success, fills *width_out/*height_out with the
@@ -336,7 +359,7 @@ static char *generate_thumbnail(const char *path, size_t *width_out,
 	char *thumbnail = NULL, *path_copy1 = NULL, *path_copy2 = NULL, *fname_noext = NULL;
 	MagickWand *magick_wand = NULL;
 	int ok = 0;
- 
+
 	path_copy1 = strdup(path);
 	path_copy2 = strdup(path);
 	if (!path_copy1 || !path_copy2) {
@@ -345,14 +368,14 @@ static char *generate_thumbnail(const char *path, size_t *width_out,
 	}
 	char *fname = basename(path_copy1);
 	char *fdir = dirname(path_copy2);
- 
+
 	char thumb_dir[PATH_MAX];
 	snprintf(thumb_dir, sizeof(thumb_dir), "%s/.thumbnails", fdir);
 	if (mkdir(thumb_dir, 0755) != 0 && errno != EEXIST) {
 		Errnof(E_FAIL, "mkdir failed for '%s'", thumb_dir);
 		goto cleanup;
 	}
- 
+
 	size_t thumb_len =
 		strlen(fdir) + strlen("/.thumbnails/") + strlen(fname) + 16;
 	thumbnail = malloc(thumb_len);
@@ -374,7 +397,7 @@ static char *generate_thumbnail(const char *path, size_t *width_out,
 	char *base_ext = strrchr(fname_noext, '.');
 	if (base_ext && base_ext != fname_noext)
 		*base_ext = '\0';
- 
+
 	int suffix = 0;
 	for (;;) {
 		if (suffix == 0) {
@@ -388,7 +411,7 @@ static char *generate_thumbnail(const char *path, size_t *width_out,
 			break; // path is free
 		suffix++;
 	}
- 
+
 	magick_wand = NewMagickWand();
 	if (MagickReadImage(magick_wand, path) == MagickFalse) {
 		ExceptionType severity;
@@ -398,10 +421,10 @@ static char *generate_thumbnail(const char *path, size_t *width_out,
 		magick_err = (char *)MagickRelinquishMemory(magick_err);
 		goto cleanup;
 	}
- 
+
 	*width_out = MagickGetImageWidth(magick_wand);
 	*height_out = MagickGetImageHeight(magick_wand);
- 
+
 	MagickResetIterator(magick_wand);
 	while (MagickNextImage(magick_wand) != MagickFalse) {
 		double scale = fmin(640.0 / (double)*width_out,
@@ -412,7 +435,7 @@ static char *generate_thumbnail(const char *path, size_t *width_out,
 			new_w = 1;
 		if (new_h == 0)
 			new_h = 1;
- 
+
 		if (MagickResizeImage(magick_wand, new_w, new_h, LanczosFilter) ==
 				MagickFalse) {
 			ExceptionType severity;
@@ -423,7 +446,7 @@ static char *generate_thumbnail(const char *path, size_t *width_out,
 			goto cleanup;
 		}
 	}
- 
+
 	if (MagickSetImageFormat(magick_wand, "JPEG") == MagickFalse) {
 		ExceptionType severity;
 		char *magick_err = MagickGetException(magick_wand, &severity);
@@ -432,7 +455,7 @@ static char *generate_thumbnail(const char *path, size_t *width_out,
 		magick_err = (char *)MagickRelinquishMemory(magick_err);
 		goto cleanup;
 	}
- 
+
 	if (MagickWriteImages(magick_wand, thumbnail, MagickTrue) == MagickFalse) {
 		ExceptionType severity;
 		char *magick_err = MagickGetException(magick_wand, &severity);
@@ -441,9 +464,9 @@ static char *generate_thumbnail(const char *path, size_t *width_out,
 		magick_err = (char *)MagickRelinquishMemory(magick_err);
 		goto cleanup;
 	}
- 
+
 	ok = 1;
- 
+
 cleanup:
 	free(path_copy1);
 	free(path_copy2);
@@ -456,7 +479,7 @@ cleanup:
 	}
 	return thumbnail;
 }
- 
+
 // Returns a malloc'd title built from the file's basename with its
 // extension stripped (caller frees), or NULL on error.
 static char *build_title(const char *path) {
@@ -475,7 +498,7 @@ static char *build_title(const char *path) {
 		Errnof(E_CRIT, "strdup failed building title");
 	return title;
 }
- 
+
 // Returns a malloc'd, lowercase, hyphen-separated slug built from `title`
 // (caller frees), or NULL on error.
 static char *slugify(const char *title) {
@@ -485,7 +508,7 @@ static char *slugify(const char *title) {
 		Errnof(E_CRIT, "malloc failed for slug");
 		return NULL;
 	}
- 
+
 	char *out = slug;
 	int last_was_hyphen = 1; /* suppress leading hyphens */
 	for (const unsigned char *p = (const unsigned char *)title; *p; p++) {
@@ -502,7 +525,7 @@ static char *slugify(const char *title) {
 	*out = '\0';
 	return slug;
 }
- 
+
 // Checks `slug` against existing slugs and, if it collides, returns a new
 // malloc'd slug with a "-N" suffix appended to make it unique. Takes
 // ownership of `slug` either way (it is freed if a new one is allocated, or
@@ -513,7 +536,7 @@ static char *resolve_slug_collision(PGconn *conn, char *slug,
 	const char *check_sql =
 		"SELECT slug FROM wallpapers WHERE slug = $1 OR slug LIKE $1 || '-%'";
 	const char *check_params[1] = {slug};
- 
+
 	check_res = PQexecParams(conn, check_sql, 1, NULL, check_params, NULL,
 			NULL, 0);
 	if (PQresultStatus(check_res) != PGRES_TUPLES_OK) {
@@ -523,7 +546,7 @@ static char *resolve_slug_collision(PGconn *conn, char *slug,
 		free(slug);
 		return NULL;
 	}
- 
+
 	if (PQntuples(check_res) > 0) {
 		int max_n = 0;
 		size_t base_len = strlen(slug);
@@ -556,11 +579,11 @@ static char *resolve_slug_collision(PGconn *conn, char *slug,
 			slug = new_slug;
 		}
 	}
- 
+
 	PQclear(check_res);
 	return slug;
 }
- 
+
 // Inserts the wallpaper row.
 static int insert_wallpaper(PGconn *conn, const struct image_ctx *img,
 		const char *title, const char *slug, const char *thumbnail,
@@ -573,7 +596,7 @@ static int insert_wallpaper(PGconn *conn, const struct image_ctx *img,
 	snprintf(fsize_str, sizeof(fsize_str), "%zu", img->entry->fsize);
 	snprintf(width_str, sizeof(width_str), "%zu", width);
 	snprintf(height_str, sizeof(height_str), "%zu", height);
- 
+
 	const char *param_values[11] = {
 		title,     slug,          img->entry->path, thumbnail,
 		mime_type, fsize_str,     width_str,        height_str,
@@ -581,29 +604,29 @@ static int insert_wallpaper(PGconn *conn, const struct image_ctx *img,
 	};
 	int param_lengths[11] = {0, 0, 0, 0, 0, 0, 0, 0, 32, 0, 0};
 	int param_formats[11] = {0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0}; // md is binary
- 
+
 	const char *insert =
 		"INSERT INTO wallpapers "
 		"(title, slug, image, thumbnail, mime_type, file_size, width, "
 		"height, checksum, embedding, created_at) "
 		"VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)";
- 
+
 	res_insert = PQexecParams(conn, insert, 11, NULL, param_values,
 			param_lengths, param_formats, 0);
- 
+
 	if (PQresultStatus(res_insert) != PGRES_COMMAND_OK) {
 		Errorf(E_FAIL, "insert failed for '%s': %s", img->entry->path,
 				PQresultErrorMessage(res_insert));
 		goto cleanup;
 	}
- 
+
 	rc = 0;
- 
+
 cleanup:
 	PQclear(res_insert);
 	return rc;
 }
- 
+
 int process_img(struct image_ctx *img) {
 	int rc = -1;
 	unsigned char md[32];
@@ -611,16 +634,16 @@ int process_img(struct image_ctx *img) {
 	char embedding_str[EMBED_STR_MAX];
 	char created_str[32];
 	size_t width = 0, height = 0;
- 
+
 	char *mime_type = NULL;
 	char *thumbnail = NULL;
 	char *title = NULL;
 	char *slug = NULL;
- 
+
 	if (compute_checksum_and_mime(img->entry->path, img->entry->fsize, md,
 				&md_len, &mime_type) != 0)
 		goto cleanup;
- 
+
 	int dup = check_duplicate(img->conn, md, img->entry->path);
 	if (dup < 0)
 		goto cleanup;
@@ -629,35 +652,35 @@ int process_img(struct image_ctx *img) {
 		rc = 1;
 		goto cleanup;
 	}
- 
+
 	if (encode_image_embedding(img->clip_ctx, img->entry->path, embedding_str,
 				sizeof(embedding_str)) != 0)
 		goto cleanup;
- 
+
 	format_created_at(img->entry->created_at, created_str, sizeof(created_str));
- 
+
 	thumbnail = generate_thumbnail(img->entry->path, &width, &height);
 	if (!thumbnail)
 		goto cleanup;
- 
+
 	title = build_title(img->entry->path);
 	if (!title)
 		goto cleanup;
- 
+
 	slug = slugify(title);
 	if (!slug)
 		goto cleanup;
- 
+
 	slug = resolve_slug_collision(img->conn, slug, img->entry->path);
 	if (!slug) // already freed by resolve_slug_collision on failure
 		goto cleanup;
- 
+
 	if (insert_wallpaper(img->conn, img, title, slug, thumbnail, mime_type,
 				width, height, md, embedding_str, created_str) != 0)
 		goto cleanup;
- 
+
 	rc = 0;
- 
+
 cleanup:
 	free(mime_type);
 	free(thumbnail);
@@ -780,72 +803,124 @@ cleanup:
 }
 
 int connect_socket(int fd, const char *socket_path) {
-    struct sockaddr_un addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
+	struct sockaddr_un addr;
+	memset(&addr, 0, sizeof(addr));
+	addr.sun_family = AF_UNIX;
+	strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
 
-    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        Errnof(E_CRIT, "connect() failed");
-        return -1;
-    }
-    return 0;
+	if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+		Errnof(E_CRIT, "connect() failed");
+		return -1;
+	}
+	return 0;
 }
 
 int write_query_socket(char *query, int fd) {
-    int rc = 1;
-    char query_buf[strlen(query) + 1];
-    strcpy(query_buf, query);
+	int rc = 1;
+	char query_buf[strlen(query) + 1];
+	strcpy(query_buf, query);
 
-    // write query to server socket
-    if (write(fd, query_buf, strlen(query) + 1) < 0) {
-        Errnof(E_CRIT, "Failed to write to socket.");
+	// write query to server socket
+	if (write(fd, query_buf, strlen(query) + 1) < 0) {
+		Errnof(E_CRIT, "Failed to write to socket.");
 #if !defined(DEBUG)
-        fprintf(stderr, "wallclip: Failed to write to socket.");
+		fprintf(stderr, "wallclip: Failed to write to socket.");
 #endif
-        goto cleanup;
-    }
+		goto cleanup;
+	}
 
-    rc = 0;
+	rc = 0;
 
 cleanup:
-    if (rc != 0)
-        close(fd);
-    return rc;
+	if (rc != 0)
+		close(fd);
+	return rc;
 }
 
 int main(int argc, char *argv[]) {
 	int rc = -1;
 	bool is_server = (argc == 1);
-	bool is_query = 0;
+	bool is_query = false;
+	int verbosity = 0;
+	int c;
+	int nfiles;
+	const char *conflict = NULL;
 	char *query_str = NULL;
 	PGconn *conn = NULL;
-	char *sockp = strdup(socket_path);
 	struct clip_ctx *clip_ctx = NULL;
-	struct file_list *file_list = file_list_new(argc - 1);
-	if (!file_list)
+	struct file_list *file_list = NULL;
+	char *sockp = strdup(socket_path);
+	if (!sockp) {
+		Errnof(E_CRIT, "strdup failed");
 		goto cleanup;
+	}
 
-	for (int i = 1; !is_server && i < argc; i++) {
-		if (strcmp(argv[i], "-q") == 0 || strcmp(argv[i], "--query") == 0) {
-			if (i + 1 >= argc) {
-				fprintf(stderr, "wallclip: %s requires an argument\n", argv[i]);
+	while ((c = getopt_long(argc, argv, "d:q:vh", long_options, NULL)) != -1) {
+		switch (c) {
+			case 'd':
+				/* TODO: implement delete */
+				fprintf(stderr, "wallclip: --delete/-d is not implemented yet\n");
+				rc = -2;
 				goto cleanup;
-			}
-			is_query = true;
-			query_str = argv[i + 1];
-			break;
+			case 'q':
+				is_query = true;
+				query_str = optarg;
+				break;
+			case 'v':
+				verbosity = 1;
+				break;
+			case 'h':
+				usage(stdout);
+				rc = 0;
+				goto cleanup;
+			case '?':
+				/* getopt already printed the specific error */
+				usage(stderr);
+				rc = -2;
+				goto cleanup;
+			default:
+				fprintf(stderr, "wallclip: unexpected getopt code 0%o\n", c);
+				rc = -2;
+				goto cleanup;
 		}
+	}
+
+	/* remaining non-option args are the files to process */
+	nfiles = argc - optind;
+	is_server = !is_query && nfiles == 0;
+
+	if (is_query && nfiles > 0) {
+		conflict = "--query cannot be combined with file arguments";
+		fprintf(stderr, "wallclip: %s\n", conflict);
+		usage(stderr);
+		rc = -2;
+		goto cleanup;
+	}
+
+	if (!is_server && !is_query && nfiles == 0) {
+		usage(stdout);
+		rc = 0;
+		goto cleanup;
+	}
+
+	if (nfiles > 0) {
+		file_list = file_list_new(nfiles);
+		if (!file_list)
+			goto cleanup;
+	}
+
+	for (int i = 0; i < nfiles; i++) {
+		const char *path = argv[optind + i];
 		struct stat st;
-		if (stat(argv[i], &st) != 0) {
-			Errnof(E_FAIL, "%s:", argv[i]);
+		if (stat(path, &st) != 0) {
+			Errnof(E_FAIL, "%s:", path);
 			goto cleanup;
 		}
 
-		struct file_entry *e = &file_list->entries[i - 1];
-		char *resolved_path = realpath(argv[i], NULL);
+		struct file_entry *e = &file_list->entries[i];
+		char *resolved_path = realpath(path, NULL);
 		if (!resolved_path) {
-			Errnof(E_FAIL, "%s:", argv[i]);
+			Errnof(E_FAIL, "%s:", path);
 			goto cleanup;
 		}
 		e->path = resolved_path;
@@ -853,96 +928,95 @@ int main(int argc, char *argv[]) {
 		e->modified_at = st.st_mtime;
 
 		struct statx stx;
-		if (statx(AT_FDCWD, argv[i], 0, STATX_BTIME, &stx) == 0 &&
+		if (statx(AT_FDCWD, path, 0, STATX_BTIME, &stx) == 0 &&
 				(stx.stx_mask & STATX_BTIME)) {
 			e->created_at = stx.stx_btime.tv_sec;
 		} else {
-			e->created_at = e->modified_at; /* fallback for when filesystem doesn't
-											   support birth time. */
+			e->created_at = e->modified_at; /* fallback for filesystems
+											   without birth time */
 		}
 	}
 
-	rc = init_setup(&conn, &clip_ctx);
-	if(rc < 0)
+	if (init_setup(&conn, &clip_ctx) < 0)
 		goto cleanup;
 
 	if (is_server) {
-        int fd = create_socket();
-        if (fd < 0) {
-            Errorf(E_CRIT, "Failed to create socket.");
-            goto cleanup;
-        }
-        if (bind_socket(fd, sockp) < 0) {
-            fd = -1; // closed by bind_socket
-            Errorf(E_CRIT, "Failed to bind socket.");
-            goto cleanup;
-        }
-        if (listen_socket(fd) < 0) {
-            fd = -1; // closed by listen_socket
-            Errorf(E_CRIT, "Failed to create socket.");
-            goto cleanup;
-        }
-        serve_queries(fd, clip_ctx, conn);
-        fd = -1; // closed by serve_queries
-        rc = 0;
-        goto cleanup;
+		int fd = create_socket();
+		if (fd < 0) {
+			Errorf(E_CRIT, "Failed to create socket.");
+			goto cleanup;
+		}
+		if (bind_socket(fd, sockp) < 0) {
+			Errorf(E_CRIT, "Failed to bind socket.");
+			goto cleanup;
+		}
+		if (listen_socket(fd) < 0) {
+			Errorf(E_CRIT, "Failed to listen on socket.");
+			goto cleanup;
+		}
+		serve_queries(fd, clip_ctx, conn);
+		close(fd);
+		rc = 0;
+		goto cleanup;
 	}
 
-    if (is_query) {
-        // create client socket
-        int fd = create_socket();
-        if (fd < 0) {
-            Errorf(E_CRIT, "Failed to create socket.");
-            goto cleanup;
-        }
+	if (is_query) {
+		int fd = create_socket();
+		if (fd < 0) {
+			Errorf(E_CRIT, "Failed to create socket.");
+			goto cleanup;
+		}
 
-        // connect to server socket
-        if (connect_socket(fd, sockp) < 0) {
-            Errorf(E_CRIT, "Failed to connect to socket.");
-            goto cleanup;
-        }
+		if (connect_socket(fd, sockp) < 0) {
+			close(fd);
+			Errorf(E_CRIT, "Failed to connect to socket.");
+			goto cleanup;
+		}
 
-        if (write_query_socket(query_str, fd) != 0) {
-            fd = -1; // closed by write_query_socket
-            Errorf(E_CRIT, "failed to write query to socket");
-            goto cleanup;
-        }
+		if (write_query_socket(query_str, fd) != 0) {
+			fd = -1; // closed by write_query_socket
+			Errorf(E_CRIT, "failed to write query to socket");
+			goto cleanup;
+		}
 
-        shutdown(fd, SHUT_WR); // signal end of request
+		shutdown(fd, SHUT_WR); // signal end of request
 
-        char buf[4096];
-        while (1) {
-            ssize_t n = read(fd, buf, sizeof(buf));
-            if (n == 0)
-                break; // server closed, done
-            if (n < 0) {
-                if (errno == EINTR)
-                    continue;
-                Errnof(E_CRIT, "read() from socket failed");
-                goto cleanup;
-            }
-            if (fwrite(buf, 1, (size_t)n, stdout) != (size_t)n) {
-                Errnof(E_CRIT, "fwrite to stdout failed");
-                goto cleanup;
-            }
-        }
+		char buf[4096];
+		while (1) {
+			ssize_t n = read(fd, buf, sizeof(buf));
+			if (n == 0)
+				break; // server closed, done
+			if (n < 0) {
+				if (errno == EINTR)
+					continue;
+				Errnof(E_CRIT, "read() from socket failed");
+				close(fd);
+				goto cleanup;
+			}
+			if (fwrite(buf, 1, (size_t)n, stdout) != (size_t)n) {
+				Errnof(E_CRIT, "fwrite to stdout failed");
+				close(fd);
+				goto cleanup;
+			}
+		}
 
-        rc = 0;
-        goto cleanup;
-    }
+		close(fd);
+		rc = 0;
+		goto cleanup;
+	}
 
-       int failed = 0;
-       struct image_ctx img = {.clip_ctx = clip_ctx, .conn = conn};
-       for (int i = 0; i < file_list->count; i++) {
-               img.entry = &file_list->entries[i];
-               int prc = process_img(&img);
-               if (prc < 0) {
-                       puts(img.entry->path);
-                       failed++;
-               }
-       }
+	int failed = 0;
+	struct image_ctx img = {.clip_ctx = clip_ctx, .conn = conn};
+	for (int i = 0; i < file_list->count; i++) {
+		img.entry = &file_list->entries[i];
+		int prc = process_img(&img);
+		if (prc < 0) {
+			puts(img.entry->path);
+			failed++;
+		}
+	}
 
-       rc = failed ? 1 : 0;
+	rc = failed ? 1 : 0;
 cleanup:
 	free(sockp);
 	if (clip_ctx)
