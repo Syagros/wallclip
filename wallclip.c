@@ -70,7 +70,7 @@ int init_setup(PGconn **conn, struct clip_ctx **clip_ctx)
 
 	*conn = PQconnectdb(conninfo);
 	if (PQstatus(*conn) != CONNECTION_OK) {
-		Errorf(E_FAIL, "connection failed: %s", PQerrorMessage(*conn));
+		Errorf(E_CRIT, "connection failed: %s", PQerrorMessage(*conn));
 		rc = -1;
 	}
 
