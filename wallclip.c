@@ -130,12 +130,16 @@ int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn,
 	}
 
 	// Compare embedding_str with pg database embeddings and get thumbnail paths
-	const char *param_values[1] = {embedding_str};
-	const char *sql = "SELECT thumbnail FROM wallpapers "
-		"WHERE 1 - (embedding <=> $1::vector(512)) > 0.27 "
+	char thresh_buf[32];
+	snprintf(thresh_buf, sizeof thresh_buf, "%.6f", similarity_threshold);
+
+	const char *param_values[2] = { embedding_str, thresh_buf };
+	const char *sql =
+		"SELECT thumbnail FROM wallpapers "
+		"WHERE 1 - (embedding <=> $1::vector(512)) > $2::float8 "
 		"ORDER BY embedding <=> $1::vector(512)";
 
-	res = PQexecParams(conn, sql, 1, NULL, param_values, NULL, NULL, 0);
+	res = PQexecParams(conn, sql, 2, NULL, param_values, NULL, NULL, 0);
 	if (PQresultStatus(res) != PGRES_TUPLES_OK) {
 		Errorf(E_FAIL, "similarity query failed: %s", PQerrorMessage(conn));
 		goto cleanup;
