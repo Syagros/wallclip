@@ -1,5 +1,3 @@
-#if defined(DEBUG) && ~LOG_H
-#define LOG_H
 #include <stdio.h>
 #include <stdarg.h>
 #include <errno.h>
@@ -61,8 +59,3 @@ Errnof_impl(const char * const type, const char * const func, const char * const
 
 #define Errnof(TYPE, ...) \
     Errnof_impl(TYPE, __func__, __FILE__, __LINE__, __VA_ARGS__)
-
-#else
-#define Errorf(TYPE, ...)
-#define Errnof(TYPE, ...)
-#endif
