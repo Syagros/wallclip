@@ -55,3 +55,12 @@ Options:
   -d, --delete
   -h, --help
 ```
+
+# TODO:
+* Better error handling
+* Make it be use to use models with different embedding dimensions, currently hard codes it to 512, as well as in database schema
+* Fix fd ownership consistency
+* Make code portable
+* Fix cleaning up orphaned thumbnail. If process_img fails after generating thumbnail it doesn't cleanup orphaned thumbnail before exiting.
+* Better slugify()
+* To implement -d/--delete: Rewrite the read/write logic of socket functions
