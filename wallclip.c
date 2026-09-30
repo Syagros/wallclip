@@ -947,15 +947,12 @@ int main(int argc, char *argv[]) {
 	if (is_server) {
 		int fd = create_socket();
 		if (fd < 0) {
-			Errorf(E_CRIT, "Failed to create socket.");
 			goto cleanup;
 		}
 		if (bind_socket(fd, sockp) < 0) {
-			Errorf(E_CRIT, "Failed to bind socket.");
 			goto cleanup;
 		}
 		if (listen_socket(fd) < 0) {
-			Errorf(E_CRIT, "Failed to listen on socket.");
 			goto cleanup;
 		}
 		serve_queries(fd, clip_ctx, conn);
@@ -967,19 +964,16 @@ int main(int argc, char *argv[]) {
 	if (is_query) {
 		int fd = create_socket();
 		if (fd < 0) {
-			Errorf(E_CRIT, "Failed to create socket.");
 			goto cleanup;
 		}
 
 		if (connect_socket(fd, sockp) < 0) {
 			close(fd);
-			Errorf(E_CRIT, "Failed to connect to socket.");
 			goto cleanup;
 		}
 
 		if (write_query_socket(query_str, fd) != 0) {
 			fd = -1; // closed by write_query_socket
-			Errorf(E_CRIT, "failed to write query to socket");
 			goto cleanup;
 		}
 
