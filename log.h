@@ -26,6 +26,15 @@ static char* __ErrStr__[] = {
 #define E_FAIL __ErrStr__[5]
 #define E_CRIT __ErrStr__[6]
 
+extern int verbosity;
+
+static int
+Log_levels(const char * const type)
+{
+    if (type == E_WARN) return verbosity >= 2;
+    if (type == E_HINT || type == E_OKAY) return verbosity >= 3;
+    return 1;   // FAIL, CRIT always print
+}
 static void
 Errorf_impl(const char * const type, const char * const func, const char * const file, const int line,
             const char * const fmt, ...)
@@ -54,8 +63,14 @@ Errnof_impl(const char * const type, const char * const func, const char * const
     fprintf(stderr, __ErrStr__[0], type, msg, eno, func, file, line);
 }
 
+/* They are wrapped in do { ... } while (0) so that the macros acts as a statement (a function call)
+* without it, the if block could clobber up parent if block and ind to its else state ment */
 #define Errorf(TYPE, ...) \
-    Errorf_impl(TYPE, __func__, __FILE__, __LINE__, __VA_ARGS__)
+    do { if (Log_levels(TYPE)) \
+             Errorf_impl(TYPE, __func__, __FILE__, __LINE__, __VA_ARGS__); \
+    } while (0)
 
 #define Errnof(TYPE, ...) \
-    Errnof_impl(TYPE, __func__, __FILE__, __LINE__, __VA_ARGS__)
+    do { if (Log_levels(TYPE)) \
+             Errnof_impl(TYPE, __func__, __FILE__, __LINE__, __VA_ARGS__); \
+    } while (0)

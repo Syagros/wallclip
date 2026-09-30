@@ -5,4 +5,5 @@
 
 const char conninfo[256] = "dbname=CHANGEME! user=CHANGEME! password=CHANGEME!";
 const char *socket_path = "/run/wallclip/socket";
+static int verbosity = 0;
 const float similarity_threshold = 0.27;

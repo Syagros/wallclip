@@ -696,7 +696,7 @@ cleanup:
 struct file_list *file_list_new(size_t count) {
 	struct file_list *list = malloc(sizeof(*list));
 	if (!list) {
-		Errnof(E_FAIL, "malloc failed");
+		Errnof(E_CRIT, "malloc failed");
 		goto cleanup;
 	}
 	list->count = count;
