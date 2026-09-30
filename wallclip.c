@@ -845,7 +845,6 @@ int main(int argc, char *argv[]) {
 	int rc = -1;
 	bool is_server = (argc == 1);
 	bool is_query = false;
-	int verbosity = 0;
 	int c;
 	int nfiles;
 	const char *conflict = NULL;
@@ -871,7 +870,8 @@ int main(int argc, char *argv[]) {
 				query_str = optarg;
 				break;
 			case 'v':
-				verbosity = 1;
+				if (verbosity < 3)
+					verbosity++;
 				break;
 			case 'h':
 				usage(stdout);
