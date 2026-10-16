@@ -628,6 +628,18 @@ cleanup:
 	return rc;
 }
 
+// The types the mime_type CHECK in schema.sql accepts. Anything else would
+// only fail at the insert, after the encoding and the thumbnail were done.
+static bool mime_supported(const char *mime) {
+	static const char *const supported[] = {
+		"image/jpeg", "image/png", "image/webp", "image/gif",
+	};
+	for (size_t i = 0; i < sizeof supported / sizeof *supported; i++)
+		if (strcmp(mime, supported[i]) == 0)
+			return true;
+	return false;
+}
+
 // Checks whether an image with checksum `md` is already in the database.
 // Returns 1 if it's a duplicate, 0 if not, -1 on error.
 static int check_duplicate(PGconn *conn, const unsigned char *md,
@@ -937,6 +949,12 @@ int process_img(struct image_ctx *img) {
 	if (compute_checksum_and_mime(img->entry->path, img->entry->fsize, md,
 				&md_len, &mime_type) != 0)
 		goto cleanup;
+
+	if (!mime_supported(mime_type)) {
+		Errorf(E_FAIL, "'%s': unsupported type '%s'", img->entry->path,
+				mime_type);
+		goto cleanup;
+	}
 
 	int dup = check_duplicate(img->conn, md, img->entry->path);
 	if (dup < 0)
