@@ -85,23 +85,31 @@ int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn,
 		char ***out_matches, int *out_count) {
 	int rc = -1;
 	char embedding_str[EMBED_STR_MAX];
-	struct image_ctx img;
-	img.clip_ctx = clip_ctx;
-	img.conn = conn;
 	size_t offset = 0;
 	int written;
 	PGresult *res = NULL;
 	char **match = NULL;
 	int n_matches = 0;
+	float *vec = NULL;
+	struct clip_tokens tokens = {0}; // zeroed so clip_tokens_free is safe on early exit
 
 	// Tokenize text
-	struct clip_tokens tokens;
-	clip_tokenize(img.clip_ctx, query, &tokens);
+	if (!clip_tokenize(clip_ctx, query, &tokens)) {
+		Errorf(E_FAIL, "failed to tokenize query");
+		goto cleanup;
+	}
 
 	// Encode text
 	int vec_dim = clip_get_text_hparams(clip_ctx)->projection_dim;
-	float vec[vec_dim];
-	clip_text_encode(clip_ctx, 4, &tokens, vec, true);
+	vec = malloc(sizeof(float) * (size_t)vec_dim);
+	if (!vec) {
+		Errnof(E_CRIT, "malloc failed for text vector");
+		goto cleanup;
+	}
+	if (!clip_text_encode(clip_ctx, 4, &tokens, vec, true)) {
+		Errorf(E_FAIL, "failed to encode query");
+		goto cleanup;
+	}
 
 	// Convert vec to a pg array
 	written = snprintf(embedding_str + offset, EMBED_STR_MAX - offset, "[");
@@ -165,6 +173,7 @@ int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn,
 	rc = 0;
 
 cleanup:
+	free(vec);
 	if (match) {
 		for (int i = 0; i < n_matches; i++)
 			free(match[i]);
