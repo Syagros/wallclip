@@ -1,6 +1,7 @@
 #define _GNU_SOURCE // needed for statx()
 #include "wallclip.h"
 #include "log.h"
+#include "env-loader.h"
 #include <MagickWand/MagickWand.h>
 #include <clip.h>
 #include <ctype.h>
@@ -28,7 +29,6 @@
 
 #define BUFFER_SIZE 4096
 #define DISCARD_MAX (64 * 1024) // max oversized request bytes drained
-#define MAX_MATCHES 100
 
 struct file_entry {
 	char *path;
@@ -72,13 +72,32 @@ static void usage(FILE *out) {
 
 int init_setup(PGconn **conn, struct clip_ctx **clip_ctx)
 {
-	*conn = PQconnectdb(conninfo);
+	// unset/empty values are ignored by libpq, so it falls back to its own
+	// defaults and PG* variables
+	const char *keywords[] = { "dbname", "user", "password", "host", "port", NULL };
+	const char *values[] = {
+		env_get("WALLCLIP_DB_NAME"),
+		env_get("WALLCLIP_DB_USER"),
+		env_get("WALLCLIP_DB_PASSWORD"),
+		env_get("WALLCLIP_DB_HOST"),
+		env_get("WALLCLIP_DB_PORT"),
+		NULL
+	};
+
+	// PQconnectdbParams() blocks until authentication is done (or failed), so
+	// the credentials are not needed after it returns
+	*conn = PQconnectdbParams(keywords, values, 0);
+	env_scrub("WALLCLIP_DB_NAME");
+	env_scrub("WALLCLIP_DB_USER");
+	env_scrub("WALLCLIP_DB_PASSWORD");
+	memset(values, 0, sizeof(values));
+
 	if (PQstatus(*conn) != CONNECTION_OK) {
 		Errorf(E_CRIT, "connection failed: %s", PQerrorMessage(*conn));
 		return -1;
 	}
 
-	*clip_ctx = clip_model_load(CLIP_MODEL_PATH, 0);
+	*clip_ctx = clip_model_load(model_path, 0);
 	if (!*clip_ctx) {
 		Errorf(E_CRIT, "failed to load clip model");
 		return -1;
@@ -212,7 +231,7 @@ int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn,
 	// Compare embedding_str with pg database embeddings and get thumbnail paths
 	char dist_buf[32], limit_buf[16];
 	snprintf(dist_buf, sizeof dist_buf, "%.6f", 1.0 - similarity_threshold);
-	snprintf(limit_buf, sizeof limit_buf, "%d", MAX_MATCHES);
+	snprintf(limit_buf, sizeof limit_buf, "%d", max_matches);
 
 	const char *param_values[3] = { embedding_str, dist_buf, limit_buf };
 	const char *sql =
@@ -1018,6 +1037,33 @@ int write_query_socket(char *query, int fd) {
 	return 0;
 }
 
+/*
+ * Loads the .env file (WALLCLIP_ENV_FILE, default ".env") and applies the
+ * WALLCLIP_* settings over the defaults from wallclip.h. Shell environment
+ * variables win over the .env file. -v flags (`cli_verbosity`) add to the
+ * configured verbosity, capped at 3. Returns 0 on success, -1 on error.
+ */
+static int load_config(int cli_verbosity) {
+	int base_verbosity = verbosity;
+
+	verbosity = cli_verbosity; // so -v also shows the loader's own messages
+	const char *env_file = getenv("WALLCLIP_ENV_FILE");
+	if (env_load_file(env_file && *env_file ? env_file : ".env") < 0)
+		return -1;
+
+	socket_path = env_get_str("WALLCLIP_SOCKET_PATH", socket_path);
+	model_path = env_get_str("WALLCLIP_MODEL_PATH", model_path);
+	similarity_threshold = (float)env_get_double("WALLCLIP_SIMILARITY_THRESHOLD",
+			similarity_threshold, 0.0, 1.0);
+	max_matches = env_get_int("WALLCLIP_MAX_MATCHES", max_matches, 1, 100000);
+
+	verbosity = env_get_int("WALLCLIP_VERBOSITY", base_verbosity, 0, 3) +
+		cli_verbosity;
+	if (verbosity > 3)
+		verbosity = 3;
+	return 0;
+}
+
 int main(int argc, char *argv[]) {
 	int rc = -1;
 	bool is_server = false;
@@ -1030,11 +1076,8 @@ int main(int argc, char *argv[]) {
 	PGconn *conn = NULL;
 	struct clip_ctx *clip_ctx = NULL;
 	struct file_list *file_list = NULL;
-	char *sockp = strdup(socket_path);
-	if (!sockp) {
-		Errnof(E_CRIT, "strdup failed");
-		goto cleanup;
-	}
+	char *sockp = NULL;
+	int cli_verbosity = 0;
 
 	while ((c = getopt_long(argc, argv, "d:q:vh", long_options, NULL)) != -1) {
 		switch (c) {
@@ -1048,8 +1091,8 @@ int main(int argc, char *argv[]) {
 				query_str = optarg;
 				break;
 			case 'v':
-				if (verbosity < 3)
-					verbosity++;
+				if (cli_verbosity < 3)
+					cli_verbosity++;
 				break;
 			case 'h':
 				usage(stdout);
@@ -1076,6 +1119,15 @@ int main(int argc, char *argv[]) {
 		fprintf(stderr, "wallclip: %s\n", conflict);
 		usage(stderr);
 		rc = -2;
+		goto cleanup;
+	}
+
+	if (load_config(cli_verbosity) < 0)
+		goto cleanup;
+
+	sockp = strdup(socket_path);
+	if (!sockp) {
+		Errnof(E_CRIT, "strdup failed");
 		goto cleanup;
 	}
 
@@ -1209,6 +1261,7 @@ int main(int argc, char *argv[]) {
 	rc = failed ? 1 : 0;
 cleanup:
 	free(sockp);
+	env_free(); // zeroes any secrets still in memory
 	if (wand_ready)
 		MagickWandTerminus();
 	if (clip_ctx)

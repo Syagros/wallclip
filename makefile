@@ -6,7 +6,7 @@ CFLAGS  += -I/usr/local/src/clip.cpp -I/usr/local/src/clip.cpp/ggml/include
 LDFLAGS += -L/usr/local/src/clip.cpp/build -L/usr/local/src/clip.cpp/build/ggml/src -lclip -lggml -lstdc++ -lm -lpq -lpthread
 
 TARGET = wallclip
-SRC = wallclip.c
+SRC = wallclip.c env-loader.c
 
 .PHONY: all debug clean
 
