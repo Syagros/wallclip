@@ -60,6 +60,13 @@ Options:
   -h, --help
 ```
 
+# Configuration:
+Settings are read with the precedence `wallclip.h` defaults < `.env` file < shell environment variables. The `.env` file is read from the current directory, or from the path in `WALLCLIP_ENV_FILE` (shell only). See `.env.example` for all keys:
+```sh
+cp .env.example .env && chmod 600 .env
+```
+Database credentials are zeroed from memory as soon as the PostgreSQL connection is authenticated.
+
 # TODO:
 * Better error handling
 * Make it be use to use models with different embedding dimensions, currently hard codes it to 512, as well as in database schema
