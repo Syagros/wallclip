@@ -455,8 +455,12 @@ static void handle_client(int client_fd, struct clip_ctx *clip_ctx, PGconn *conn
 	int count = 0;
 
 	struct timeval tv = { .tv_sec = 5 };
-	setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
-	setsockopt(client_fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+	// without the timeouts a stalled client would block the server
+	if (setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv) < 0 ||
+			setsockopt(client_fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv) < 0) {
+		Errnof(E_FAIL, "setsockopt() failed, dropping client");
+		goto cleanup;
+	}
 
 	ssize_t rc = read_request(client_fd, read_buffer, sizeof(read_buffer));
 	if (rc <= 0) {
@@ -518,7 +522,11 @@ static void handle_client(int client_fd, struct clip_ctx *clip_ctx, PGconn *conn
 		}
 		for (int i = 0; i < count; i++)
 			fprintf(f, "%s\n", matches[i]);
-		fclose(f);
+		if (fclose(f) != 0) {
+			Errnof(E_FAIL, "fclose() failed on the response buffer");
+			err_status = "500 Internal Server Error";
+			goto cleanup;
+		}
 
 		if (send_response(client_fd, "200 OK", "text/plain; charset=utf-8", body))
 			Errorf(E_CRIT, "send_response failed"); // can't report to client
@@ -973,8 +981,9 @@ int process_img(struct image_ctx *img) {
 	rc = 0;
 
 cleanup:
-	if (rc < 0 && thumbnail)
-		unlink(thumbnail); // don't leave an orphan if a later step failed
+	// don't leave an orphan if a later step failed
+	if (rc < 0 && thumbnail && unlink(thumbnail) != 0 && errno != ENOENT)
+		Errnof(E_WARN, "failed to remove orphan thumbnail '%s'", thumbnail);
 	free(mime_type);
 	free(thumbnail);
 	free(title);
@@ -1309,7 +1318,11 @@ int main(int argc, char *argv[]) {
 			goto cleanup;
 		}
 
-		shutdown(fd, SHUT_WR); // signal end of request
+		if (shutdown(fd, SHUT_WR) < 0) { // signal end of request
+			Errnof(E_CRIT, "shutdown() failed");
+			close(fd);
+			goto cleanup;
+		}
 
 		// a failed query is answered with a single "error: ..." line. Results
 		// are thumbnail paths from realpath(), so they never start like that.
@@ -1338,6 +1351,13 @@ int main(int argc, char *argv[]) {
 				close(fd);
 				goto cleanup;
 			}
+		}
+
+		// a failed write (e.g. closed pipe) only shows up when flushing
+		if (fflush(stdout) != 0) {
+			Errnof(E_CRIT, "write to stdout failed");
+			close(fd);
+			goto cleanup;
 		}
 
 		close(fd);
