@@ -22,6 +22,7 @@
 #include <sys/un.h>
 #include <signal.h>
 #include <sys/time.h>
+#include <time.h>
 #include <unistd.h>
 #include <getopt.h>
 
@@ -275,6 +276,31 @@ static int write_all(int fd, const char *buf, size_t len) {
 	return 0;
 }
 
+static int send_response(int client_fd, const char *status,
+		const char *content_type, const char *body) {
+	char header[512];
+	char date[64];
+	time_t now = time(NULL);
+	struct tm tm;
+	gmtime_r(&now, &tm);
+	strftime(date, sizeof date, "%a, %d %b %Y %H:%M:%S GMT", &tm);
+
+	size_t body_len = strlen(body);
+	int header_len = snprintf(header, sizeof header,
+			"HTTP/1.0 %s\r\n"
+			"Date: %s\r\n"
+			"Content-Type: %s\r\n"
+			"Content-Length: %zu\r\n"
+			"Connection: close\r\n\r\n",
+			status, date, content_type, body_len);
+	if (header_len < 0 || (size_t)header_len >= sizeof header)
+		return -1;
+
+	if (write_all(client_fd, header, (size_t)header_len) != 0)
+		return -1;
+	return write_all(client_fd, body, body_len);
+}
+
 static int hexval(int c)
 {
 	if (c >= '0' && c <= '9') return c - '0';
@@ -316,7 +342,8 @@ static void normalize_query(char *s, bool url_decode)
 }
 
 // Reads a request into `buf` (NUL-terminated, at most size-1 bytes) until the
-// client half-closes. Returns bytes read, or -1 on error or timeout.
+// client half-closes, or, for an HTTP GET, until the end of its headers.
+// Returns bytes read, or -1 on error or timeout.
 static ssize_t read_request(int fd, char *buf, size_t size) {
 	size_t total = 0;
 
@@ -330,6 +357,12 @@ static ssize_t read_request(int fd, char *buf, size_t size) {
 		if (n == 0)
 			break;
 		total += (size_t)n;
+
+		// HTTP clients don't half-close, so stop at the end of the headers
+		buf[total] = '\0';
+		if (total >= 5 && strncmp(buf, "GET /", 5) == 0 &&
+				(strstr(buf, "\r\n\r\n") || strstr(buf, "\n\n")))
+			break;
 	}
 
 	// Oversized request: discard the rest (bounded) so close() doesn't send
@@ -352,8 +385,12 @@ static ssize_t read_request(int fd, char *buf, size_t size) {
 }
 
 static void handle_client(int client_fd, struct clip_ctx *clip_ctx, PGconn *conn) {
+	bool is_http = false;
+	const char *err_status = NULL; // set before goto cleanup on HTTP failures
 	char read_buffer[BUFFER_SIZE];
 	char **matches = NULL;
+	char *q = NULL;
+	char *body = NULL;
 	int count = 0;
 
 	struct timeval tv = { .tv_sec = 5 };
@@ -367,25 +404,71 @@ static void handle_client(int client_fd, struct clip_ctx *clip_ctx, PGconn *conn
 		goto cleanup;
 	}
 
-	normalize_query(read_buffer, false);
-	if (read_buffer[0] == '\0')
-		goto cleanup;
+	if (strncmp("GET /", read_buffer, 5) == 0) {
+		is_http = true;
 
-	if (query(read_buffer, clip_ctx, conn, &matches, &count) != 0)
-		goto cleanup;
-
-	for (int i = 0; i < count; i++)
-		if (dprintf(client_fd, "%s\n", matches[i]) <= 0) {
-			Errnof(E_CRIT, "dprintf failed");
+		char *start = read_buffer + 5;
+		char *end = strstr(start, " HTTP");
+		if (!end) {
+			err_status = "400 Bad Request";
 			goto cleanup;
 		}
 
+		q = strndup(start, (size_t)(end - start));
+	} else {
+		q = strdup(read_buffer);
+	}
+
+	if (!q) {
+		Errnof(E_WARN, "strdup() failed");
+		err_status = "500 Internal Server Error";
+		goto cleanup;
+	}
+
+	normalize_query(q, is_http);
+	if (q[0] == '\0') {
+		err_status = "400 Bad Request";
+		goto cleanup;
+	}
+
+	if (query(q, clip_ctx, conn, &matches, &count) != 0) {
+		err_status = "500 Internal Server Error";
+		goto cleanup;
+	}
+
+	if (is_http) {
+		size_t len = 0;
+		FILE *f = open_memstream(&body, &len);
+		if (!f) {
+			Errnof(E_CRIT, "open_memstream failed");
+			err_status = "500 Internal Server Error";
+			goto cleanup;
+		}
+		for (int i = 0; i < count; i++)
+			fprintf(f, "%s\n", matches[i]);
+		fclose(f);
+
+		if (send_response(client_fd, "200 OK", "text/plain; charset=utf-8", body))
+			Errorf(E_CRIT, "send_response failed"); // can't report to client
+	} else {
+		for (int i = 0; i < count; i++)
+			if (dprintf(client_fd, "%s\n", matches[i]) <= 0) {
+				Errnof(E_CRIT, "dprintf failed");
+				goto cleanup;
+			}
+	}
+
 cleanup:
+	if (is_http && err_status)
+		send_response(client_fd, err_status, "text/plain; charset=utf-8",
+				err_status);
 	if (matches) {
 		for (int i = 0; i < count; i++)
 			free(matches[i]);
 		free(matches);
 	}
+	free(body);
+	free(q);
 	close(client_fd);
 }
 
