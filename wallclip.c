@@ -183,6 +183,12 @@ int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn,
 		goto cleanup;
 	}
 
+	// the text encoder's buffers only fit CLIP_MAX_TOKENS, truncate like CLIP does
+	if (tokens.size > CLIP_MAX_TOKENS) {
+		tokens.data[CLIP_MAX_TOKENS - 1] = tokens.data[tokens.size - 1]; // end token
+		tokens.size = CLIP_MAX_TOKENS;
+	}
+
 	// Encode text
 	int vec_dim = clip_get_text_hparams(clip_ctx)->projection_dim;
 	vec = malloc(sizeof(float) * (size_t)vec_dim);
