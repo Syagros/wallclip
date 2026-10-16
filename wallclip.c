@@ -24,6 +24,8 @@
 #include <unistd.h>
 #include <getopt.h>
 
+#define MAX_MATCHES 100
+
 struct file_entry {
 	char *path;
 	size_t fsize;
@@ -198,16 +200,18 @@ int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn,
 	}
 
 	// Compare embedding_str with pg database embeddings and get thumbnail paths
-	char thresh_buf[32];
-	snprintf(thresh_buf, sizeof thresh_buf, "%.6f", similarity_threshold);
+	char dist_buf[32], limit_buf[16];
+	snprintf(dist_buf, sizeof dist_buf, "%.6f", 1.0 - similarity_threshold);
+	snprintf(limit_buf, sizeof limit_buf, "%d", MAX_MATCHES);
 
-	const char *param_values[2] = { embedding_str, thresh_buf };
+	const char *param_values[3] = { embedding_str, dist_buf, limit_buf };
 	const char *sql =
 		"SELECT thumbnail FROM wallpapers "
-		"WHERE 1 - (embedding <=> $1::vector(512)) > $2::float8 "
-		"ORDER BY embedding <=> $1::vector(512)";
+		"WHERE (embedding <=> $1::vector) < $2::float8 "
+		"ORDER BY embedding <=> $1::vector "
+		"LIMIT $3::int";
 
-	res = PQexecParams(conn, sql, 2, NULL, param_values, NULL, NULL, 0);
+	res = PQexecParams(conn, sql, 3, NULL, param_values, NULL, NULL, 0);
 	if (PQresultStatus(res) != PGRES_TUPLES_OK) {
 		Errorf(E_FAIL, "similarity query failed: %s", PQerrorMessage(conn));
 		goto cleanup;
