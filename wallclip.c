@@ -531,9 +531,13 @@ static void handle_client(int client_fd, struct clip_ctx *clip_ctx, PGconn *conn
 	}
 
 cleanup:
-	if (is_http && err_status)
-		send_response(client_fd, err_status, "text/plain; charset=utf-8",
-				err_status);
+	if (err_status) {
+		if (is_http)
+			send_response(client_fd, err_status, "text/plain; charset=utf-8",
+					err_status);
+		else // "NNN Reason": raw clients get the reason without the code
+			dprintf(client_fd, "error: %s\n", err_status + 4);
+	}
 	if (matches) {
 		for (int i = 0; i < count; i++)
 			free(matches[i]);
@@ -1301,7 +1305,10 @@ int main(int argc, char *argv[]) {
 
 		shutdown(fd, SHUT_WR); // signal end of request
 
+		// a failed query is answered with a single "error: ..." line. Results
+		// are thumbnail paths from realpath(), so they never start like that.
 		char buf[BUFFER_SIZE];
+		bool first_chunk = true, server_error = false;
 		while (1) {
 			ssize_t n = read(fd, buf, sizeof(buf));
 			if (n == 0)
@@ -1313,15 +1320,22 @@ int main(int argc, char *argv[]) {
 				close(fd);
 				goto cleanup;
 			}
-			if (fwrite(buf, 1, (size_t)n, stdout) != (size_t)n) {
-				Errnof(E_CRIT, "fwrite to stdout failed");
+			if (first_chunk) {
+				server_error = n >= 7 && memcmp(buf, "error: ", 7) == 0;
+				if (server_error)
+					fputs("wallclip: ", stderr);
+				first_chunk = false;
+			}
+			FILE *out = server_error ? stderr : stdout;
+			if (fwrite(buf, 1, (size_t)n, out) != (size_t)n) {
+				Errnof(E_CRIT, "fwrite failed");
 				close(fd);
 				goto cleanup;
 			}
 		}
 
 		close(fd);
-		rc = 0;
+		rc = server_error ? 1 : 0;
 		goto cleanup;
 	}
 
