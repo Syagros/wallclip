@@ -668,6 +668,8 @@ int process_img(struct image_ctx *img) {
 	rc = 0;
 
 cleanup:
+	if (rc < 0 && thumbnail)
+		unlink(thumbnail); // don't leave an orphan if a later step failed
 	free(mime_type);
 	free(thumbnail);
 	free(title);
