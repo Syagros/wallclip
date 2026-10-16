@@ -127,7 +127,7 @@ static char *format_embedding(const float *vec, int vec_dim) {
 	size_t max = (size_t)vec_dim * EMBED_FLOAT_MAX + 3;
 	char *str = malloc(max);
 	if (!str) {
-		Errnof(E_CRIT, "malloc failed for embedding string");
+		Errnof(E_FAIL, "malloc failed for embedding string");
 		return NULL;
 	}
 
@@ -166,7 +166,7 @@ static float *encode_image_embedding(struct clip_ctx *ctx, const char *path,
 	struct clip_image_f32 *img_f32 = clip_image_f32_make();
 
 	if (!img_u8 || !img_f32) {
-		Errorf(E_CRIT, "failed to allocate clip image buffers");
+		Errorf(E_FAIL, "failed to allocate clip image buffers");
 		goto cleanup;
 	}
 
@@ -183,7 +183,7 @@ static float *encode_image_embedding(struct clip_ctx *ctx, const char *path,
 	int dim = clip_get_vision_hparams(ctx)->projection_dim;
 	vec = malloc((size_t)dim * sizeof(float));
 	if (!vec) {
-		Errnof(E_CRIT, "malloc failed for embedding vector");
+		Errnof(E_FAIL, "malloc failed for embedding vector");
 		goto cleanup;
 	}
 
@@ -231,7 +231,7 @@ int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn,
 	int vec_dim = clip_get_text_hparams(clip_ctx)->projection_dim;
 	vec = malloc(sizeof(float) * (size_t)vec_dim);
 	if (!vec) {
-		Errnof(E_CRIT, "malloc failed for text vector");
+		Errnof(E_FAIL, "malloc failed for text vector");
 		goto cleanup;
 	}
 	if (!clip_text_encode(clip_ctx, 4, &tokens, vec, true)) {
@@ -268,13 +268,13 @@ int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn,
 	if (n_matches > 0) {
 		match = calloc(n_matches, sizeof(char *));
 		if (!match) {
-			Errnof(E_CRIT, "calloc failed for match array");
+			Errnof(E_FAIL, "calloc failed for match array");
 			goto cleanup;
 		}
 		for (int i = 0; i < n_matches; i++) {
 			match[i] = strdup(PQgetvalue(res, i, 0));
 			if (!match[i]) {
-				Errnof(E_CRIT, "strdup failed for matched thumbnail path");
+				Errnof(E_FAIL, "strdup failed for matched thumbnail path");
 				goto cleanup;
 			}
 		}
@@ -488,7 +488,7 @@ static void handle_client(int client_fd, struct clip_ctx *clip_ctx, PGconn *conn
 	}
 
 	if (!q) {
-		Errnof(E_WARN, "strdup() failed");
+		Errnof(E_FAIL, "strdup() failed");
 		err_status = "500 Internal Server Error";
 		goto cleanup;
 	}
@@ -519,7 +519,7 @@ static void handle_client(int client_fd, struct clip_ctx *clip_ctx, PGconn *conn
 		size_t len = 0;
 		FILE *f = open_memstream(&body, &len);
 		if (!f) {
-			Errnof(E_CRIT, "open_memstream failed");
+			Errnof(E_FAIL, "open_memstream failed");
 			err_status = "500 Internal Server Error";
 			goto cleanup;
 		}
@@ -532,11 +532,11 @@ static void handle_client(int client_fd, struct clip_ctx *clip_ctx, PGconn *conn
 		}
 
 		if (send_response(client_fd, "200 OK", "text/plain; charset=utf-8", body))
-			Errorf(E_CRIT, "send_response failed"); // can't report to client
+			Errorf(E_FAIL, "send_response failed"); // can't report to client
 	} else {
 		for (int i = 0; i < count; i++)
 			if (dprintf(client_fd, "%s\n", matches[i]) <= 0) {
-				Errnof(E_CRIT, "dprintf failed");
+				Errnof(E_FAIL, "dprintf failed");
 				goto cleanup;
 			}
 	}
@@ -613,7 +613,7 @@ static int compute_checksum_and_mime(const char *path, size_t fsize,
 	// invalid once it is closed, so make our own copy before closing.
 	*mime_type_out = strdup(mime_result);
 	if (!*mime_type_out) {
-		Errnof(E_CRIT, "strdup failed for mime_type");
+		Errnof(E_FAIL, "strdup failed for mime_type");
 		goto cleanup;
 	}
 
@@ -703,7 +703,7 @@ static char *generate_thumbnail(const char *path, size_t *width_out,
 	path_copy1 = strdup(path);
 	path_copy2 = strdup(path);
 	if (!path_copy1 || !path_copy2) {
-		Errnof(E_CRIT, "strdup failed for path");
+		Errnof(E_FAIL, "strdup failed for path");
 		goto cleanup;
 	}
 	char *fname = basename(path_copy1);
@@ -720,7 +720,7 @@ static char *generate_thumbnail(const char *path, size_t *width_out,
 		strlen(fdir) + strlen("/.thumbnails/") + strlen(fname) + 1;
 	thumbnail = malloc(thumb_len);
 	if (!thumbnail) {
-		Errnof(E_CRIT, "malloc failed for thumbnail path");
+		Errnof(E_FAIL, "malloc failed for thumbnail path");
 		goto cleanup;
 	}
 
@@ -794,7 +794,7 @@ cleanup:
 static char *build_title(const char *path) {
 	char *path_copy = strdup(path);
 	if (!path_copy) {
-		Errnof(E_CRIT, "strdup failed building title");
+		Errnof(E_FAIL, "strdup failed building title");
 		return NULL;
 	}
 	char *title_raw = basename(path_copy);
@@ -804,7 +804,7 @@ static char *build_title(const char *path) {
 	char *title = strdup(title_raw);
 	free(path_copy);
 	if (!title)
-		Errnof(E_CRIT, "strdup failed building title");
+		Errnof(E_FAIL, "strdup failed building title");
 	return title;
 }
 
@@ -814,7 +814,7 @@ static char *slugify(const char *title) {
 	size_t title_len = strlen(title);
 	char *slug = malloc(title_len + 16); // room for the "untitled" fallback
 	if (!slug) {
-		Errnof(E_CRIT, "malloc failed for slug");
+		Errnof(E_FAIL, "malloc failed for slug");
 		return NULL;
 	}
 
@@ -890,7 +890,7 @@ static char *resolve_slug_collision(PGconn *conn, char *slug,
 	size_t new_len = base_len + 16;
 	char *new_slug = malloc(new_len);
 	if (!new_slug) {
-		Errnof(E_CRIT, "malloc failed building unique slug");
+		Errnof(E_FAIL, "malloc failed building unique slug");
 		free(slug);
 		return NULL;
 	}
@@ -1082,7 +1082,7 @@ struct file_list *file_list_new(int count) {
 	list->count = count;
 	list->entries = calloc(count, sizeof(*list->entries));
 	if (!list->entries) {
-		Errnof(E_FAIL, "calloc failed");
+		Errnof(E_CRIT, "calloc failed");
 		goto cleanup;
 	}
 

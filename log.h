@@ -20,6 +20,13 @@ static char* __ErrStr__[] = {
 };
 #define __ERRNO_STR__ 
 
+/*
+ * E_CRIT  the program can't go on and exits (setup, bind, config)
+ * E_FAIL  this item failed but the program carries on (one image of a list,
+ *         one client of the server), shown always
+ * E_WARN  something is off but nothing failed (verbosity >= 2)
+ * E_HINT, E_OKAY  progress and success messages (verbosity >= 3)
+ */
 #define E_OKAY __ErrStr__[2]
 #define E_HINT __ErrStr__[3]
 #define E_WARN __ErrStr__[4]
