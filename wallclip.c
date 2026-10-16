@@ -843,6 +843,7 @@ int main(int argc, char *argv[]) {
 	int rc = -1;
 	bool is_server = false;
 	bool is_query = false;
+	bool wand_ready = false;
 	int c;
 	int nfiles;
 	const char *conflict = NULL;
@@ -900,6 +901,8 @@ int main(int argc, char *argv[]) {
 	}
 
 	if (nfiles > 0) {
+		MagickWandGenesis();
+		wand_ready = true;
 		file_list = file_list_new(nfiles);
 		if (!file_list)
 			goto cleanup;
@@ -1009,6 +1012,8 @@ int main(int argc, char *argv[]) {
 	rc = failed ? 1 : 0;
 cleanup:
 	free(sockp);
+	if (wand_ready)
+		MagickWandTerminus();
 	if (clip_ctx)
 		clip_free(clip_ctx);
 	if (conn)
