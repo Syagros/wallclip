@@ -640,25 +640,35 @@ static bool mime_supported(const char *mime) {
 	return false;
 }
 
-// Checks whether an image with checksum `md` is already in the database.
-// Returns 1 if it's a duplicate, 0 if not, -1 on error.
+// Checks whether the image is already in the database, by checksum `md` or by
+// `path`. Returns DUP_CONTENT if the same contents are there, DUP_PATH if the
+// path is there with other contents (the file changed since it was added),
+// DUP_NONE if neither, -1 on error.
+enum { DUP_NONE = 0, DUP_CONTENT = 1, DUP_PATH = 2 };
+
 static int check_duplicate(PGconn *conn, const unsigned char *md,
 		const char *path) {
 	int rc = -1;
 	PGresult *res = NULL;
-	const char *param_values[1] = {(const char *)md};
-	int param_lengths[1] = {32};
-	int param_formats[1] = {1}; // binary
+	const char *param_values[2] = {(const char *)md, path};
+	int param_lengths[2] = {32, 0};
+	int param_formats[2] = {1, 0}; // md is binary
 
-	res = PQexecParams(conn, "SELECT 1 FROM wallpapers WHERE checksum = $1",
-			1, NULL, param_values, param_lengths, param_formats, 0);
+	// a row with the same checksum sorts first
+	res = PQexecParams(conn,
+			"SELECT checksum = $1 FROM wallpapers "
+			"WHERE checksum = $1 OR image = $2 ORDER BY 1 DESC LIMIT 1",
+			2, NULL, param_values, param_lengths, param_formats, 0);
 	if (PQresultStatus(res) != PGRES_TUPLES_OK) {
 		Errorf(E_FAIL, "duplicate check failed for '%s': %s", path,
 				PQerrorMessage(conn));
 		goto cleanup;
 	}
 
-	rc = (PQntuples(res) > 0) ? 1 : 0;
+	if (PQntuples(res) == 0)
+		rc = DUP_NONE;
+	else
+		rc = PQgetvalue(res, 0, 0)[0] == 't' ? DUP_CONTENT : DUP_PATH;
 
 cleanup:
 	PQclear(res);
@@ -959,9 +969,16 @@ int process_img(struct image_ctx *img) {
 	int dup = check_duplicate(img->conn, md, img->entry->path);
 	if (dup < 0)
 		goto cleanup;
-	if (dup > 0) {
+	if (dup == DUP_CONTENT) {
 		Errorf(E_WARN, "Skipping %s, duplicate.", img->entry->path);
 		rc = 1;
+		goto cleanup;
+	}
+	if (dup == DUP_PATH) {
+		// inserting would fail on the unique path, and the cleanup after that
+		// would remove the thumbnail the existing row still points to
+		Errorf(E_FAIL, "'%s' is already added with different contents",
+				img->entry->path);
 		goto cleanup;
 	}
 
