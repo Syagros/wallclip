@@ -36,6 +36,10 @@ Expected stdout:
 /absolute/path/to/.thumbnails/matching-image-4.png
 /absolute/path/to/.thumbnails/matching-image-5.png
 ``` 
+The server also answers plain HTTP `GET` requests on the same socket (queries are lowercased and URL-decoded, at most 100 results):
+```sh
+curl --unix-socket /run/wallclip/socket "http://localhost/red+sunset"
+```
 Why does it return thumbnail paths? Because I wrote it to show thumbnail previews on queries on a webpage.
 
 It can delete image from filesystem and database (WiP)
@@ -61,6 +65,5 @@ Options:
 * Make it be use to use models with different embedding dimensions, currently hard codes it to 512, as well as in database schema
 * Fix fd ownership consistency
 * Make code portable
-* Fix cleaning up orphaned thumbnail. If process_img fails after generating thumbnail it doesn't cleanup orphaned thumbnail before exiting.
 * Better slugify()
 * To implement -d/--delete: Rewrite the read/write logic of socket functions
