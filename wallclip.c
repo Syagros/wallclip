@@ -691,7 +691,7 @@ cleanup:
 	return rc;
 }
 
-struct file_list *file_list_new(size_t count) {
+struct file_list *file_list_new(int count) {
 	struct file_list *list = malloc(sizeof(*list));
 	if (!list) {
 		Errnof(E_CRIT, "malloc failed");
@@ -700,7 +700,7 @@ struct file_list *file_list_new(size_t count) {
 	list->count = count;
 	list->entries = calloc(count, sizeof(*list->entries));
 	if (!list->entries) {
-		Errnof(E_FAIL, "malloc failed");
+		Errnof(E_FAIL, "calloc failed");
 		goto cleanup;
 	}
 
