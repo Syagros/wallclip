@@ -26,6 +26,7 @@
 #include <getopt.h>
 
 #define BUFFER_SIZE 4096
+#define DISCARD_MAX (64 * 1024) // max oversized request bytes drained
 #define MAX_MATCHES 100
 
 struct file_entry {
@@ -289,6 +290,21 @@ static ssize_t read_request(int fd, char *buf, size_t size) {
 		if (n == 0)
 			break;
 		total += (size_t)n;
+	}
+
+	// Oversized request: discard the rest (bounded) so close() doesn't send
+	// an RST that makes the client lose our reply with ECONNRESET.
+	if (total == size - 1) {
+		char discard[BUFFER_SIZE];
+		size_t dropped = 0;
+		while (dropped < DISCARD_MAX) {
+			ssize_t n = read(fd, discard, sizeof discard);
+			if (n < 0 && errno == EINTR)
+				continue;
+			if (n <= 0)
+				break;
+			dropped += (size_t)n;
+		}
 	}
 
 	buf[total] = '\0';
