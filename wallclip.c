@@ -55,7 +55,7 @@ static void usage(FILE *out) {
 			"Usage:\n"
 			"  wallclip [-v]				run server in foreground\n"
 			"  wallclip [-v] FILE...			add images (space separated)\n"
-  			"  wallclip [-v] -d FILE [-d FILE2 ...]	delete images (both, db and fs; repeat -d per file)\n"
+			"  wallclip [-v] -d FILE [-d FILE2 ...]	delete images (both, db and fs; repeat -d per file)\n"
 			"  wallclip [-v] -q, --query STR		query for images\n"
 			"\n"
 			"Options:\n"
