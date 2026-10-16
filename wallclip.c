@@ -275,6 +275,46 @@ static int write_all(int fd, const char *buf, size_t len) {
 	return 0;
 }
 
+static int hexval(int c)
+{
+	if (c >= '0' && c <= '9') return c - '0';
+	if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+	if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+	return -1;
+}
+
+// Normalizes `s` in place: lowercases, turns runs of whitespace, control
+// characters, '-' and '_' into a single '-', and drops leading/trailing
+// separators. With `url_decode`, "%XX" escapes are decoded first and '+'
+// counts as a space.
+static void normalize_query(char *s, bool url_decode)
+{
+	char *w = s;
+	bool pending_sep = false;
+
+	for (char *r = s; *r; r++) {
+		unsigned char c = (unsigned char)*r;
+
+		if (url_decode && c == '%' &&
+				hexval(r[1]) >= 0 && hexval(r[2]) >= 0) {
+			c = (unsigned char)((hexval(r[1]) << 4) | hexval(r[2]));
+			r += 2;
+		}
+
+		if ((url_decode && c == '+') || c == '-' || c == '_' ||
+				isspace(c) || iscntrl(c)) {
+			pending_sep = (w != s);   // drops leading separators
+			continue;
+		}
+		if (pending_sep) {
+			*w++ = '-';
+			pending_sep = false;
+		}
+		*w++ = (char)tolower(c);
+	}
+	*w = '\0';
+}
+
 // Reads a request into `buf` (NUL-terminated, at most size-1 bytes) until the
 // client half-closes. Returns bytes read, or -1 on error or timeout.
 static ssize_t read_request(int fd, char *buf, size_t size) {
@@ -326,6 +366,10 @@ static void handle_client(int client_fd, struct clip_ctx *clip_ctx, PGconn *conn
 			Errnof(E_WARN, "read() failed");
 		goto cleanup;
 	}
+
+	normalize_query(read_buffer, false);
+	if (read_buffer[0] == '\0')
+		goto cleanup;
 
 	if (query(read_buffer, clip_ctx, conn, &matches, &count) != 0)
 		goto cleanup;
