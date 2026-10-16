@@ -81,12 +81,92 @@ int init_setup(PGconn **conn, struct clip_ctx **clip_ctx)
 	return 0;
 }
 
+// formats vector into `embedding_str` (of size `embedding_str_max`) as a
+// pgvector literal. Returns 0 on success, -1 on error.
+static int format_embedding(float *vec, int vec_dim,
+		char *embedding_str, size_t embedding_str_max) {
+	int rc = -1;
+
+	size_t offset = 0;
+	int written = snprintf(embedding_str + offset, embedding_str_max - offset, "[");
+	if (written < 0 || (size_t)written >= embedding_str_max - offset) {
+		goto cleanup;
+	}
+	offset += (size_t)written;
+
+	for (int i = 0; i < vec_dim; i++) {
+		written = snprintf(embedding_str + offset, embedding_str_max - offset,
+				"%s%.6f", (i == 0) ? "" : ",", vec[i]);
+		if (written < 0 || (size_t)written >= embedding_str_max - offset) {
+			goto cleanup;
+		}
+		offset += (size_t)written;
+	}
+
+	written = snprintf(embedding_str + offset, embedding_str_max - offset, "]");
+	if (written < 0 || (size_t)written >= embedding_str_max - offset) {
+		goto cleanup;
+	}
+
+	rc = 0;
+
+cleanup:
+	return rc;
+}
+
+// Encodes the image at `path` with CLIP. Returns a malloc'd float vector of
+// length *dim_out (caller frees), or NULL on error.
+static float *encode_image_embedding(struct clip_ctx *ctx, const char *path,
+		int *dim_out) {
+	float *vec = NULL;
+	bool ok = false;
+	struct clip_image_u8 *img_u8 = clip_image_u8_make();
+	struct clip_image_f32 *img_f32 = clip_image_f32_make();
+
+	if (!img_u8 || !img_f32) {
+		Errorf(E_CRIT, "failed to allocate clip image buffers");
+		goto cleanup;
+	}
+
+	if (!clip_image_load_from_file(path, img_u8)) {
+		Errorf(E_FAIL, "clip failed to load '%s'", path);
+		goto cleanup;
+	}
+
+	if (!clip_image_preprocess(ctx, img_u8, img_f32)) {
+		Errorf(E_FAIL, "clip preprocess failed for '%s'", path);
+		goto cleanup;
+	}
+
+	int dim = clip_get_vision_hparams(ctx)->projection_dim;
+	vec = malloc((size_t)dim * sizeof(float));
+	if (!vec) {
+		Errnof(E_CRIT, "malloc failed for embedding vector");
+		goto cleanup;
+	}
+
+	if (!clip_image_encode(ctx, 4, img_f32, vec, true)) {
+		Errorf(E_FAIL, "clip encode failed for '%s'", path);
+		goto cleanup;
+	}
+
+	*dim_out = dim;
+	ok = true;
+
+cleanup:
+	if (img_u8)  clip_image_u8_free(img_u8);
+	if (img_f32) clip_image_f32_free(img_f32);
+	if (!ok) {
+		free(vec);
+		vec = NULL;
+	}
+	return vec;
+}
+
 int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn,
 		char ***out_matches, int *out_count) {
 	int rc = -1;
 	char embedding_str[EMBED_STR_MAX];
-	size_t offset = 0;
-	int written;
 	PGresult *res = NULL;
 	char **match = NULL;
 	int n_matches = 0;
@@ -112,26 +192,8 @@ int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn,
 	}
 
 	// Convert vec to a pg array
-	written = snprintf(embedding_str + offset, EMBED_STR_MAX - offset, "[");
-	if (written < 0 || (size_t)written >= EMBED_STR_MAX - offset) {
-		Errorf(E_CRIT, "Failed to format embedding vector (buffer too small)");
-		goto cleanup;
-	}
-	offset += written;
-
-	for (int i = 0; i < vec_dim; i++) {
-		written = snprintf(embedding_str + offset, EMBED_STR_MAX - offset, "%s%.6f",
-				(i == 0) ? "" : ",", vec[i]);
-		if (written < 0 || (size_t)written >= EMBED_STR_MAX - offset) {
-			Errorf(E_CRIT, "Failed to format embedding vector (buffer too small)");
-			goto cleanup;
-		}
-		offset += written;
-	}
-
-	written = snprintf(embedding_str + offset, EMBED_STR_MAX - offset, "]");
-	if (written < 0 || (size_t)written >= EMBED_STR_MAX - offset) {
-		Errorf(E_CRIT, "Failed to format embedding vector (buffer too small)");
+	if (format_embedding(vec, vec_dim, embedding_str, EMBED_STR_MAX) < 0) {
+		Errorf(E_FAIL, "failed to format query embedding (buffer too small)");
 		goto cleanup;
 	}
 
@@ -273,79 +335,6 @@ static int check_duplicate(PGconn *conn, const unsigned char *md,
 
 cleanup:
 	PQclear(res);
-	return rc;
-}
-
-// Loads, preprocesses and CLIP-encodes the image at `path`, formatting the
-// resulting vector into `embedding_str` (of size `embedding_str_max`) as a
-// pgvector literal. Returns 0 on success, -1 on error.
-static int encode_image_embedding(struct clip_ctx *clip_ctx, const char *path,
-		char *embedding_str, size_t embedding_str_max) {
-	int rc = -1;
-	struct clip_image_u8 *img0 = NULL;
-	struct clip_image_f32 *img_res = NULL;
-	float *img_vec = NULL;
-	int vec_dim = clip_get_vision_hparams(clip_ctx)->projection_dim;
-
-	img_vec = malloc(sizeof(float) * (size_t)vec_dim);
-	if (!img_vec) {
-		Errnof(E_CRIT, "malloc failed for image vector");
-		goto cleanup;
-	}
-
-	img0 = clip_image_u8_make();
-	if (!clip_image_load_from_file(path, img0)) {
-		Errnof(E_FAIL, "failed to load image from '%s'", path);
-		goto cleanup;
-	}
-	img_res = clip_image_f32_make();
-	if (!clip_image_preprocess(clip_ctx, img0, img_res)) {
-		Errorf(E_FAIL, "failed to preprocess image '%s'", path);
-		goto cleanup;
-	}
-	if (!clip_image_encode(clip_ctx, 4, img_res, img_vec, true)) {
-		Errorf(E_FAIL, "failed to encode image '%s'", path);
-		goto cleanup;
-	}
-
-	size_t offset = 0;
-	int written = snprintf(embedding_str, embedding_str_max, "[");
-	if (written < 0 || (size_t)written >= embedding_str_max) {
-		Errorf(E_CRIT,
-				"failed to format embedding vector for '%s' (buffer too small)",
-				path);
-		goto cleanup;
-	}
-	offset += (size_t)written;
-
-	for (int i = 0; i < vec_dim; i++) {
-		written = snprintf(embedding_str + offset, embedding_str_max - offset,
-				"%s%.6f", (i == 0) ? "" : ",", img_vec[i]);
-		if (written < 0 || (size_t)written >= embedding_str_max - offset) {
-			Errorf(E_CRIT,
-					"failed to format embedding vector for '%s' (buffer too small)",
-					path);
-			goto cleanup;
-		}
-		offset += (size_t)written;
-	}
-
-	written = snprintf(embedding_str + offset, embedding_str_max - offset, "]");
-	if (written < 0 || (size_t)written >= embedding_str_max - offset) {
-		Errorf(E_CRIT,
-				"failed to format embedding vector for '%s' (buffer too small)",
-				path);
-		goto cleanup;
-	}
-
-	rc = 0;
-
-cleanup:
-	free(img_vec);
-	if (img0)
-		clip_image_u8_free(img0);
-	if (img_res)
-		clip_image_f32_free(img_res);
 	return rc;
 }
 
@@ -649,7 +638,8 @@ int process_img(struct image_ctx *img) {
 	char embedding_str[EMBED_STR_MAX];
 	char created_str[32];
 	size_t width = 0, height = 0;
-
+	int dim = 0;
+	float *vec = NULL;
 	char *mime_type = NULL;
 	char *thumbnail = NULL;
 	char *title = NULL;
@@ -668,9 +658,16 @@ int process_img(struct image_ctx *img) {
 		goto cleanup;
 	}
 
-	if (encode_image_embedding(img->clip_ctx, img->entry->path, embedding_str,
-				sizeof(embedding_str)) != 0)
+	// preprocessing and encoding
+	vec = encode_image_embedding(img->clip_ctx, img->entry->path, &dim);
+	if (!vec)
 		goto cleanup;
+
+	if (format_embedding(vec, dim, embedding_str, sizeof(embedding_str)) != 0) {
+		Errorf(E_FAIL, "embedding string buffer too small for '%s'",
+				img->entry->path);
+		goto cleanup;
+	}
 
 	format_created_at(img->entry->created_at, created_str, sizeof(created_str));
 
@@ -701,6 +698,7 @@ cleanup:
 	free(thumbnail);
 	free(title);
 	free(slug);
+	free(vec);
 	return rc;
 }
 
