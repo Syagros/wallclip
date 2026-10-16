@@ -69,7 +69,6 @@ Database credentials are zeroed from memory as soon as the PostgreSQL connection
 
 # TODO:
 * Better error handling
-* Make it be use to use models with different embedding dimensions, currently hard codes it to 512, as well as in database schema
 * Make code portable
 * Better slugify()
 * To implement -d/--delete: Rewrite the read/write logic of socket functions
