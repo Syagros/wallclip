@@ -113,7 +113,6 @@ Notes:
 * To run the old and new servers side by side, give the new one its own `WALLCLIP_SOCKET_PATH`.
 
 # TODO:
-* Better error handling
 * Make code portable
 * Better slugify()
 * To implement -d/--delete: Rewrite the read/write logic of socket functions
