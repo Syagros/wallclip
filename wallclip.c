@@ -309,10 +309,12 @@ static int hexval(int c)
 	return -1;
 }
 
-// Normalizes `s` in place: lowercases, turns runs of whitespace, control
-// characters, '-' and '_' into a single '-', and drops leading/trailing
-// separators. With `url_decode`, "%XX" escapes are decoded first and '+'
-// counts as a space.
+/*
+ * Normalizes `s` in place: lowercases, turns runs of whitespace, control
+ * characters, '-' and '_' into a single '-', and drops leading/trailing
+ * separators. With `url_decode`, "%XX" escapes are decoded first and '+'
+ * counts as a space.
+ */
 static void normalize_query(char *s, bool url_decode)
 {
 	char *w = s;
@@ -341,9 +343,11 @@ static void normalize_query(char *s, bool url_decode)
 	*w = '\0';
 }
 
-// Reads a request into `buf` (NUL-terminated, at most size-1 bytes) until the
-// client half-closes, or, for an HTTP GET, until the end of its headers.
-// Returns bytes read, or -1 on error or timeout.
+/*
+ * Reads a request into `buf` (NUL-terminated, at most size-1 bytes) until the
+ * client half-closes, or, for an HTTP GET, until the end of its headers.
+ * Returns bytes read, or -1 on error or timeout.
+ */
 static ssize_t read_request(int fd, char *buf, size_t size) {
 	size_t total = 0;
 
@@ -472,9 +476,11 @@ cleanup:
 	close(client_fd);
 }
 
-// Reads the file at `path` (whose size is already known as `fsize`), hashes
-// it with SHA-256 into `md_out`/`md_len_out`, and detects its MIME type into
-// a malloc'd string at `*mime_type_out` (caller frees).
+/*
+ * Reads the file at `path` (whose size is already known as `fsize`), hashes
+ * it with SHA-256 into `md_out`/`md_len_out`, and detects its MIME type into
+ * a malloc'd string at `*mime_type_out` (caller frees).
+ */
 static int compute_checksum_and_mime(const char *path, size_t fsize,
 		unsigned char *md_out, unsigned int *md_len_out,
 		char **mime_type_out) {
@@ -575,12 +581,14 @@ static void format_created_at(time_t created_at, char *out, size_t out_size) {
 	}
 }
 
-// Creates a resized thumbnail (fits within 640x360, never upscaled) for the
-// image at `path` inside a `.thumbnails` directory next to it. The thumbnail
-// keeps the source's file name, so ImageMagick writes it in the same format.
-// On success, fills *width_out/*height_out with the source image's original
-// dimensions and returns a malloc'd thumbnail path (caller frees). Returns
-// NULL on error.
+/*
+ * Creates a resized thumbnail (fits within 640x360, never upscaled) for the
+ * image at `path` inside a `.thumbnails` directory next to it. The thumbnail
+ * keeps the source's file name, so ImageMagick writes it in the same format.
+ * On success, fills *width_out and *height_out with the source image's original
+ * dimensions and returns a malloc'd thumbnail path (caller frees). Returns
+ * NULL on error.
+ */
 static char *generate_thumbnail(const char *path, size_t *width_out,
 		size_t *height_out) {
 	char *thumbnail = NULL, *path_copy1 = NULL, *path_copy2 = NULL;
@@ -724,10 +732,12 @@ static char *slugify(const char *title) {
 	return slug;
 }
 
-// Checks `slug` against existing slugs and, if it collides, returns a new
-// malloc'd slug with a "-N" suffix appended to make it unique. Takes
-// ownership of `slug` either way (it is freed if a new one is allocated, or
-// on error) and returns the resulting slug (caller frees), or NULL on error.
+/*
+ * Checks `slug` against existing slugs and, if it collides, returns a new
+ * malloc'd slug with a "-N" suffix appended to make it unique. Takes
+ * ownership of `slug` either way (it is freed if a new one is allocated, or
+ * on error) and returns the resulting slug (caller frees), or NULL on error.
+ */
 static char *resolve_slug_collision(PGconn *conn, char *slug,
 		const char *path) {
 	PGresult *check_res = NULL;
