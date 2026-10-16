@@ -916,6 +916,10 @@ int main(int argc, char *argv[]) {
 			goto cleanup;
 		}
 
+		if (!S_ISREG(st.st_mode) || st.st_size == 0) {
+			Errorf(E_FAIL, "%s: not a non-empty regular file", path);
+			goto cleanup;
+		}
 		struct file_entry *e = &file_list->entries[i];
 		char *resolved_path = realpath(path, NULL);
 		if (!resolved_path) {
