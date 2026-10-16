@@ -106,37 +106,43 @@ int init_setup(PGconn **conn, struct clip_ctx **clip_ctx)
 	return 0;
 }
 
-// formats vector into `embedding_str` (of size `embedding_str_max`) as a
-// pgvector literal. Returns 0 on success, -1 on error.
-static int format_embedding(float *vec, int vec_dim,
-		char *embedding_str, size_t embedding_str_max) {
-	int rc = -1;
+// Formats vector as a pgvector literal. Returns a malloc'd string sized from
+// `vec_dim` (caller frees), or NULL on error.
+static char *format_embedding(const float *vec, int vec_dim) {
+	if (vec_dim <= 0)
+		return NULL;
+
+	// "%.6f" of a float is at most ~48 chars, plus comma; add "[]" and NUL
+	size_t max = (size_t)vec_dim * EMBED_FLOAT_MAX + 3;
+	char *str = malloc(max);
+	if (!str) {
+		Errnof(E_CRIT, "malloc failed for embedding string");
+		return NULL;
+	}
 
 	size_t offset = 0;
-	int written = snprintf(embedding_str + offset, embedding_str_max - offset, "[");
-	if (written < 0 || (size_t)written >= embedding_str_max - offset) {
-		goto cleanup;
-	}
+	int written = snprintf(str, max, "[");
+	if (written < 0 || (size_t)written >= max)
+		goto fail;
 	offset += (size_t)written;
 
 	for (int i = 0; i < vec_dim; i++) {
-		written = snprintf(embedding_str + offset, embedding_str_max - offset,
-				"%s%.6f", (i == 0) ? "" : ",", vec[i]);
-		if (written < 0 || (size_t)written >= embedding_str_max - offset) {
-			goto cleanup;
-		}
+		written = snprintf(str + offset, max - offset, "%s%.6f",
+				(i == 0) ? "" : ",", vec[i]);
+		if (written < 0 || (size_t)written >= max - offset)
+			goto fail;
 		offset += (size_t)written;
 	}
 
-	written = snprintf(embedding_str + offset, embedding_str_max - offset, "]");
-	if (written < 0 || (size_t)written >= embedding_str_max - offset) {
-		goto cleanup;
-	}
+	written = snprintf(str + offset, max - offset, "]");
+	if (written < 0 || (size_t)written >= max - offset)
+		goto fail;
 
-	rc = 0;
+	return str;
 
-cleanup:
-	return rc;
+fail:
+	free(str);
+	return NULL;
 }
 
 // Encodes the image at `path` with CLIP. Returns a malloc'd float vector of
@@ -191,7 +197,7 @@ cleanup:
 int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn,
 		char ***out_matches, int *out_count) {
 	int rc = -1;
-	char embedding_str[EMBED_STR_MAX];
+	char *embedding_str = NULL;
 	PGresult *res = NULL;
 	char **match = NULL;
 	int n_matches = 0;
@@ -223,8 +229,9 @@ int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn,
 	}
 
 	// Convert vec to a pg array
-	if (format_embedding(vec, vec_dim, embedding_str, EMBED_STR_MAX) < 0) {
-		Errorf(E_FAIL, "failed to format query embedding (buffer too small)");
+	embedding_str = format_embedding(vec, vec_dim);
+	if (!embedding_str) {
+		Errorf(E_FAIL, "failed to format query embedding");
 		goto cleanup;
 	}
 
@@ -269,6 +276,7 @@ int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn,
 
 cleanup:
 	free(vec);
+	free(embedding_str);
 	if (match) {
 		for (int i = 0; i < n_matches; i++)
 			free(match[i]);
@@ -860,7 +868,7 @@ int process_img(struct image_ctx *img) {
 	int rc = -1;
 	unsigned char md[32];
 	unsigned int md_len;
-	char embedding_str[EMBED_STR_MAX];
+	char *embedding_str = NULL;
 	char created_str[32];
 	size_t width = 0, height = 0;
 	int dim = 0;
@@ -888,8 +896,9 @@ int process_img(struct image_ctx *img) {
 	if (!vec)
 		goto cleanup;
 
-	if (format_embedding(vec, dim, embedding_str, sizeof(embedding_str)) != 0) {
-		Errorf(E_FAIL, "embedding string buffer too small for '%s'",
+	embedding_str = format_embedding(vec, dim);
+	if (!embedding_str) {
+		Errorf(E_FAIL, "failed to format embedding for '%s'",
 				img->entry->path);
 		goto cleanup;
 	}
@@ -926,6 +935,7 @@ cleanup:
 	free(title);
 	free(slug);
 	free(vec);
+	free(embedding_str);
 	return rc;
 }
 

@@ -1,13 +1,14 @@
-#define CLIP_EMBED_DIM 512
 #define CLIP_MAX_TOKENS 77 // CLIP text context length, incl. start/end tokens
-// generous fixed bound: 512 floats, each up to ~24 chars incl. comma/sign/decimals, plus brackets/NUL
-#define EMBED_STR_MAX (CLIP_EMBED_DIM * 24 + 16)
+// upper bound of one "%.6f" float in a pgvector literal: sign, 39 integer
+// digits, '.', 6 decimals, and the separating comma
+#define EMBED_FLOAT_MAX 48
 
 /*
  * Defaults for the settings below. They can be overridden at runtime, with
  * precedence: these < .env file < shell environment (see load_config()).
- * The three macros above stay compile-time, they are tied to the model and
- * to the vector(512) column in schema.sql.
+ * CLIP_MAX_TOKENS stays compile-time, it is tied to the CLIP text encoder.
+ * The embedding dimension comes from the loaded model at runtime and must
+ * match the vector(N) column created by schema.sql (see its embed_dim).
  */
 #define CLIP_MODEL_PATH "/usr/local/src/clip.cpp/models/clip-vit-base-patch32_ggml-model-f32.gguf"
 #define MAX_MATCHES 100
