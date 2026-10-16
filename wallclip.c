@@ -21,9 +21,11 @@
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <signal.h>
+#include <sys/time.h>
 #include <unistd.h>
 #include <getopt.h>
 
+#define BUFFER_SIZE 4096
 #define MAX_MATCHES 100
 
 struct file_entry {
@@ -264,6 +266,61 @@ static int write_all(int fd, const char *buf, size_t len) {
 		total += (size_t)n;
 	}
 	return 0;
+}
+
+// Reads a request into `buf` (NUL-terminated, at most size-1 bytes) until the
+// client half-closes. Returns bytes read, or -1 on error or timeout.
+static ssize_t read_request(int fd, char *buf, size_t size) {
+	size_t total = 0;
+
+	while (total < size - 1) {
+		ssize_t n = read(fd, buf + total, size - 1 - total);
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			return -1; // includes EAGAIN from SO_RCVTIMEO
+		}
+		if (n == 0)
+			break;
+		total += (size_t)n;
+	}
+
+	buf[total] = '\0';
+	return (ssize_t)total;
+}
+
+static void handle_client(int client_fd, struct clip_ctx *clip_ctx, PGconn *conn) {
+	char read_buffer[BUFFER_SIZE];
+	char **matches = NULL;
+	int count = 0;
+
+	struct timeval tv = { .tv_sec = 5 };
+	setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+	setsockopt(client_fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+
+	ssize_t rc = read_request(client_fd, read_buffer, sizeof(read_buffer));
+	if (rc <= 0) {
+		if (rc < 0)
+			Errnof(E_WARN, "read() failed");
+		goto cleanup;
+	}
+
+	if (query(read_buffer, clip_ctx, conn, &matches, &count) != 0)
+		goto cleanup;
+
+	for (int i = 0; i < count; i++)
+		if (dprintf(client_fd, "%s\n", matches[i]) <= 0) {
+			Errnof(E_CRIT, "dprintf failed");
+			goto cleanup;
+		}
+
+cleanup:
+	if (matches) {
+		for (int i = 0; i < count; i++)
+			free(matches[i]);
+		free(matches);
+	}
+	close(client_fd);
 }
 
 // Reads the file at `path` (whose size is already known as `fsize`), hashes
@@ -777,46 +834,6 @@ cleanup:
 	return rc;
 }
 
-// Accept loop: read a query string from each client, run it, write matching
-// paths back (one line, delimetered.)
-// Returns when accept() fails for a reason other than EINTR
-int serve_queries(int fd, struct clip_ctx *clip_ctx, PGconn *conn) {
-	signal(SIGPIPE, SIG_IGN);
-
-	while (1) {
-		int client_fd = accept(fd, NULL, NULL);
-		if (client_fd < 0) {
-			if (errno == EINTR)
-				continue;
-			break;
-		}
-
-		char read_buffer[4096];
-		char **matches = NULL;
-		int count = 0;
-
-		ssize_t rc = read(client_fd, read_buffer, sizeof(read_buffer) - 1);
-		if (rc < 0) {
-			Errnof(E_WARN, "read() failed");
-			goto cleanup;
-		}
-
-		read_buffer[rc] = '\0'; // rc is at most sizeof(read_buffer)-1
-		if (query(read_buffer, clip_ctx, conn, &matches, &count) == 0) {
-			for (int i = 0; i < count; i++) {
-				dprintf(client_fd, "%s\n", matches[i]);
-				free(matches[i]);
-			}
-			free(matches);
-		}
-
-cleanup:
-		close(client_fd);
-	}
-	close(fd);
-	return 0;
-}
-
 int connect_socket(int fd, const char *socket_path) {
 	struct sockaddr_un addr;
 	memset(&addr, 0, sizeof(addr));
@@ -947,6 +964,8 @@ int main(int argc, char *argv[]) {
 		goto cleanup;
 
 	if (is_server) {
+		signal(SIGPIPE, SIG_IGN); // client hangups surface as EPIPE, not a kill
+
 		int fd = create_socket();
 		if (fd < 0) {
 			goto cleanup;
@@ -957,9 +976,21 @@ int main(int argc, char *argv[]) {
 		if (listen_socket(fd) < 0) {
 			goto cleanup;
 		}
-		serve_queries(fd, clip_ctx, conn);
+
+		while (1) {
+			int client_fd = accept(fd, NULL, NULL);
+			if (client_fd < 0) {
+				if (errno == EINTR)
+					continue;
+				Errnof(E_CRIT, "accept() failed");
+				break;
+			}
+			handle_client(client_fd, clip_ctx, conn);
+		}
+
 		close(fd);
-		rc = 0;
+		unlink(sockp);
+		rc = -1; // the loop only exits on error
 		goto cleanup;
 	}
 
@@ -981,7 +1012,7 @@ int main(int argc, char *argv[]) {
 
 		shutdown(fd, SHUT_WR); // signal end of request
 
-		char buf[4096];
+		char buf[BUFFER_SIZE];
 		while (1) {
 			ssize_t n = read(fd, buf, sizeof(buf));
 			if (n == 0)
