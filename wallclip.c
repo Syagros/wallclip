@@ -26,6 +26,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <getopt.h>
+#include <poll.h>
 
 #define BUFFER_SIZE 4096
 #define DISCARD_MAX (64 * 1024) // max oversized request bytes drained
@@ -55,6 +56,13 @@ struct option long_options[] = {
 	{ "help",  no_argument, 0, 'h' },
 	{ 0, 0, 0, 0 }
 };
+
+static volatile sig_atomic_t stop_requested;
+
+static void on_stop_signal(int sig) {
+	(void)sig;
+	stop_requested = 1;
+}
 
 static void usage(FILE *out) {
 	fprintf(out,
@@ -1218,11 +1226,43 @@ int main(int argc, char *argv[]) {
 			goto cleanup;
 		}
 
-		while (1) {
+		// accept() must never block, so a stop request can't be missed
+		int fl = fcntl(fd, F_GETFL);
+		if (fl < 0 || fcntl(fd, F_SETFL, fl | O_NONBLOCK) < 0) {
+			Errnof(E_CRIT, "fcntl() failed");
+			close(fd);
+			goto cleanup;
+		}
+
+		// SIGINT/SIGTERM are only delivered while waiting in ppoll(), so a
+		// request in flight always finishes and the check below can't race
+		struct sigaction sa;
+		memset(&sa, 0, sizeof sa);
+		sa.sa_handler = on_stop_signal;
+		sigemptyset(&sa.sa_mask);
+		sigaction(SIGINT, &sa, NULL);
+		sigaction(SIGTERM, &sa, NULL);
+
+		sigset_t blocked, waiting;
+		sigemptyset(&blocked);
+		sigaddset(&blocked, SIGINT);
+		sigaddset(&blocked, SIGTERM);
+		sigprocmask(SIG_BLOCK, &blocked, &waiting);
+
+		while (!stop_requested) {
+			struct pollfd pfd = { .fd = fd, .events = POLLIN };
+			if (ppoll(&pfd, 1, NULL, &waiting) < 0) {
+				if (errno == EINTR)
+					continue;
+				Errnof(E_CRIT, "ppoll() failed");
+				break;
+			}
+
 			int client_fd = accept(fd, NULL, NULL);
 			if (client_fd < 0) {
-				// the client went away before we got to it
-				if (errno == EINTR || errno == ECONNABORTED)
+				// nothing to accept after all, or the client went away
+				if (errno == EAGAIN || errno == EWOULDBLOCK ||
+						errno == EINTR || errno == ECONNABORTED)
 					continue;
 				// out of resources, may clear up, don't take the server down
 				if (errno == EMFILE || errno == ENFILE ||
@@ -1239,7 +1279,7 @@ int main(int argc, char *argv[]) {
 
 		close(fd);
 		unlink(sockp);
-		rc = -1; // the loop only exits on error
+		rc = stop_requested ? 0 : -1; // otherwise the loop exited on an error
 		goto cleanup;
 	}
 
