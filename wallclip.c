@@ -1028,5 +1028,5 @@ cleanup:
 		free(file_list->entries);
 		free(file_list);
 	}
-	return rc;
+	return rc == 0 ? EXIT_SUCCESS : (rc == -2 ? 2 : 1); // 2 = usage error
 }
