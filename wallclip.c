@@ -720,7 +720,17 @@ int bind_socket(int fd, char *socket_path) {
 	addr.sun_family = AF_UNIX;
 	strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
 
-	unlink(socket_path); // clear stale socket
+	// refuse to start if a live server already owns the socket
+	int probe = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (probe >= 0) {
+		if (connect(probe, (struct sockaddr *)&addr, sizeof(addr)) == 0) {
+			close(probe);
+			Errorf(E_CRIT, "server already running on '%s'", socket_path);
+			goto cleanup;
+		}
+		close(probe);
+	}
+	unlink(socket_path); // stale socket
 
 	if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
 		Errnof(E_CRIT, "bind() failed");
