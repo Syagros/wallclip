@@ -1060,6 +1060,12 @@ int listen_socket(int fd) {
 int connect_socket(int fd, const char *socket_path) {
 	struct sockaddr_un addr;
 	memset(&addr, 0, sizeof(addr));
+
+	// strncpy() below would silently cut it and connect to the wrong path
+	if (strlen(socket_path) >= sizeof(addr.sun_path)) {
+		Errorf(E_CRIT, "socket path too long");
+		return -1;
+	}
 	addr.sun_family = AF_UNIX;
 	strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
 
