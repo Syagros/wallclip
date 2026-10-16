@@ -551,41 +551,43 @@ static char *resolve_slug_collision(PGconn *conn, char *slug,
 		return NULL;
 	}
 
-	if (PQntuples(check_res) > 0) {
-		int max_n = 0;
-		size_t base_len = strlen(slug);
-		for (int i = 0; i < PQntuples(check_res); i++) {
-			char *existing = PQgetvalue(check_res, i, 0);
-			size_t existing_len = strlen(existing);
-			if (existing_len == base_len && strcmp(existing, slug) == 0) {
-				if (max_n < 1)
-					max_n = 1;
-				continue;
-			}
-			if (existing_len > base_len &&
-					strncmp(existing, slug, base_len) == 0 &&
-					existing[base_len] == '-') {
-				int n = atoi(existing + base_len + 1);
-				if (n >= max_n)
-					max_n = n + 1;
-			}
+	bool taken = false;
+	int max_n = 1; // first suffix handed out is -1
+	size_t base_len = strlen(slug);
+
+	for (int i = 0; i < PQntuples(check_res); i++) {
+		const char *existing = PQgetvalue(check_res, i, 0);
+
+		if (strcmp(existing, slug) == 0) {
+			taken = true;
+			continue;
 		}
-		if (max_n > 0) {
-			char *new_slug = malloc(base_len + 16);
-			if (!new_slug) {
-				Errnof(E_CRIT, "malloc failed building unique slug");
-				PQclear(check_res);
-				free(slug);
-				return NULL;
-			}
-			snprintf(new_slug, base_len + 16, "%s-%d", slug, max_n);
-			free(slug);
-			slug = new_slug;
+
+		// only "<slug>-<digits>" counts as a numbered variant
+		if (strncmp(existing, slug, base_len) == 0 &&
+				existing[base_len] == '-') {
+			const char *num = existing + base_len + 1;
+			char *end;
+			long n = strtol(num, &end, 10);
+			if (*num && *end == '\0' && n >= max_n && n < INT_MAX - 1)
+				max_n = (int)n + 1;
 		}
 	}
-
 	PQclear(check_res);
-	return slug;
+
+	if (!taken)
+		return slug;
+
+	size_t new_len = base_len + 16;
+	char *new_slug = malloc(new_len);
+	if (!new_slug) {
+		Errnof(E_CRIT, "malloc failed building unique slug");
+		free(slug);
+		return NULL;
+	}
+	snprintf(new_slug, new_len, "%s-%d", slug, max_n);
+	free(slug);
+	return new_slug;
 }
 
 // Inserts the wallpaper row.
