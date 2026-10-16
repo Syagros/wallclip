@@ -32,6 +32,8 @@
 #define DISCARD_MAX (64 * 1024) // max oversized request bytes drained
 
 struct file_entry {
+	const char *arg; // as given on the command line, for error reports
+	bool skip;       // failed validation, only reported at the end
 	char *path;
 	size_t fsize;
 	time_t created_at;
@@ -1198,23 +1200,29 @@ int main(int argc, char *argv[]) {
 			goto cleanup;
 	}
 
+	// a bad path only fails that file, the rest of the list is still processed
+	int nvalid = 0;
 	for (int i = 0; i < nfiles; i++) {
 		const char *path = argv[optind + i];
+		struct file_entry *e = &file_list->entries[i];
 		struct stat st;
+		e->arg = path;
 		if (stat(path, &st) != 0) {
 			Errnof(E_FAIL, "%s:", path);
-			goto cleanup;
+			e->skip = true;
+			continue;
 		}
 
 		if (!S_ISREG(st.st_mode) || st.st_size == 0) {
 			Errorf(E_FAIL, "%s: not a non-empty regular file", path);
-			goto cleanup;
+			e->skip = true;
+			continue;
 		}
-		struct file_entry *e = &file_list->entries[i];
 		char *resolved_path = realpath(path, NULL);
 		if (!resolved_path) {
 			Errnof(E_FAIL, "%s:", path);
-			goto cleanup;
+			e->skip = true;
+			continue;
 		}
 		e->path = resolved_path;
 		e->fsize = st.st_size;
@@ -1228,9 +1236,12 @@ int main(int argc, char *argv[]) {
 			e->created_at = e->modified_at; /* fallback for filesystems
 											   without birth time */
 		}
+		nvalid++;
 	}
 
-	if (!is_query && init_setup(&conn, &clip_ctx) < 0)
+	// no need to load the model and connect if there is nothing to add
+	if (!is_query && (is_server || nvalid > 0) &&
+			init_setup(&conn, &clip_ctx) < 0)
 		goto cleanup;
 
 	if (is_server) {
@@ -1369,6 +1380,11 @@ int main(int argc, char *argv[]) {
 	struct image_ctx img = {.clip_ctx = clip_ctx, .conn = conn};
 	for (int i = 0; i < file_list->count; i++) {
 		img.entry = &file_list->entries[i];
+		if (img.entry->skip) {
+			puts(img.entry->arg);
+			failed++;
+			continue;
+		}
 		int prc = process_img(&img);
 		if (prc < 0) {
 			puts(img.entry->path);
