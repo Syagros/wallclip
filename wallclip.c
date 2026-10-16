@@ -1221,8 +1221,16 @@ int main(int argc, char *argv[]) {
 		while (1) {
 			int client_fd = accept(fd, NULL, NULL);
 			if (client_fd < 0) {
-				if (errno == EINTR)
+				// the client went away before we got to it
+				if (errno == EINTR || errno == ECONNABORTED)
 					continue;
+				// out of resources, may clear up, don't take the server down
+				if (errno == EMFILE || errno == ENFILE ||
+						errno == ENOBUFS || errno == ENOMEM) {
+					Errnof(E_FAIL, "accept() failed, retrying");
+					sleep(1);
+					continue;
+				}
 				Errnof(E_CRIT, "accept() failed");
 				break;
 			}
