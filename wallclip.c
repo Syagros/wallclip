@@ -991,25 +991,15 @@ int bind_socket(int fd, char *socket_path) {
 	rc = 0;
 
 cleanup:
-	if (rc != 0)
-		close(fd);
 	return rc;
 }
 
 int listen_socket(int fd) {
-	int rc = -1;
-
 	if (listen(fd, SOMAXCONN) < 0) {
 		Errnof(E_CRIT, "listen() failed");
-		goto cleanup;
+		return -1;
 	}
-
-	rc = 0;
-
-cleanup:
-	if (rc != 0)
-		close(fd);
-	return rc;
+	return 0;
 }
 
 int connect_socket(int fd, const char *socket_path) {
@@ -1181,10 +1171,8 @@ int main(int argc, char *argv[]) {
 		if (fd < 0) {
 			goto cleanup;
 		}
-		if (bind_socket(fd, sockp) < 0) {
-			goto cleanup;
-		}
-		if (listen_socket(fd) < 0) {
+		if (bind_socket(fd, sockp) < 0 || listen_socket(fd) < 0) {
+			close(fd);
 			goto cleanup;
 		}
 
