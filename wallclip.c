@@ -941,7 +941,7 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	if (init_setup(&conn, &clip_ctx) < 0)
+	if (!is_query && init_setup(&conn, &clip_ctx) < 0)
 		goto cleanup;
 
 	if (is_server) {
