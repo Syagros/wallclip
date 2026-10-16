@@ -250,6 +250,22 @@ cleanup:
 	return rc;
 }
 
+static int write_all(int fd, const char *buf, size_t len) {
+	size_t total = 0;
+	while (total < len) {
+		ssize_t n = write(fd, buf + total, len - total);
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			return -1;
+		}
+		if (n == 0)
+			return -1;
+		total += (size_t)n;
+	}
+	return 0;
+}
+
 // Reads the file at `path` (whose size is already known as `fsize`), hashes
 // it with SHA-256 into `md_out`/`md_len_out`, and detects its MIME type into
 // a malloc'd string at `*mime_type_out` (caller frees).
@@ -815,25 +831,15 @@ int connect_socket(int fd, const char *socket_path) {
 }
 
 int write_query_socket(char *query, int fd) {
-	int rc = 1;
-	char query_buf[strlen(query) + 1];
-	strcpy(query_buf, query);
-
-	// write query to server socket
-	if (write(fd, query_buf, strlen(query) + 1) < 0) {
+	if (write_all(fd, query, strlen(query)) != 0) {
 		Errnof(E_CRIT, "Failed to write to socket.");
 #if !defined(DEBUG)
-		fprintf(stderr, "wallclip: Failed to write to socket.");
+		fprintf(stderr, "wallclip: Failed to write to socket.\n");
 #endif
-		goto cleanup;
-	}
-
-	rc = 0;
-
-cleanup:
-	if (rc != 0)
 		close(fd);
-	return rc;
+		return 1;
+	}
+	return 0;
 }
 
 int main(int argc, char *argv[]) {
