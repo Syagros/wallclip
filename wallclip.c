@@ -28,6 +28,7 @@
 #include <getopt.h>
 #include <poll.h>
 
+#define EXIT_USAGE 2 // bad command line, EXIT_FAILURE (1) is any other failure
 #define BUFFER_SIZE 4096
 #define DISCARD_MAX (64 * 1024) // max oversized request bytes drained
 
@@ -1126,7 +1127,7 @@ static int load_config(int cli_verbosity) {
 }
 
 int main(int argc, char *argv[]) {
-	int rc = -1;
+	int rc = EXIT_FAILURE; // the exit code, fatal errors keep it
 	bool is_server = false;
 	bool is_query = false;
 	bool wand_ready = false;
@@ -1145,7 +1146,7 @@ int main(int argc, char *argv[]) {
 			case 'd':
 				/* TODO: implement delete */
 				fprintf(stderr, "wallclip: --delete/-d is not implemented yet\n");
-				rc = -2;
+				rc = EXIT_USAGE;
 				goto cleanup;
 			case 'q':
 				is_query = true;
@@ -1157,16 +1158,16 @@ int main(int argc, char *argv[]) {
 				break;
 			case 'h':
 				usage(stdout);
-				rc = 0;
+				rc = EXIT_SUCCESS;
 				goto cleanup;
 			case '?':
 				/* getopt already printed the specific error */
 				usage(stderr);
-				rc = -2;
+				rc = EXIT_USAGE;
 				goto cleanup;
 			default:
 				fprintf(stderr, "wallclip: unexpected getopt code 0%o\n", c);
-				rc = -2;
+				rc = EXIT_USAGE;
 				goto cleanup;
 		}
 	}
@@ -1179,7 +1180,7 @@ int main(int argc, char *argv[]) {
 		conflict = "--query cannot be combined with file arguments";
 		fprintf(stderr, "wallclip: %s\n", conflict);
 		usage(stderr);
-		rc = -2;
+		rc = EXIT_USAGE;
 		goto cleanup;
 	}
 
@@ -1309,7 +1310,7 @@ int main(int argc, char *argv[]) {
 
 		close(fd);
 		unlink(sockp);
-		rc = stop_requested ? 0 : -1; // otherwise the loop exited on an error
+		rc = stop_requested ? EXIT_SUCCESS : EXIT_FAILURE; // else it hit an error
 		goto cleanup;
 	}
 
@@ -1372,7 +1373,7 @@ int main(int argc, char *argv[]) {
 		}
 
 		close(fd);
-		rc = server_error ? 1 : 0;
+		rc = server_error ? EXIT_FAILURE : EXIT_SUCCESS;
 		goto cleanup;
 	}
 
@@ -1392,7 +1393,7 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	rc = failed ? 1 : 0;
+	rc = failed ? EXIT_FAILURE : EXIT_SUCCESS;
 cleanup:
 	free(sockp);
 	env_free(); // zeroes any secrets still in memory
@@ -1408,5 +1409,5 @@ cleanup:
 		free(file_list->entries);
 		free(file_list);
 	}
-	return rc == 0 ? EXIT_SUCCESS : (rc == -2 ? 2 : 1); // 2 = usage error
+	return rc;
 }
