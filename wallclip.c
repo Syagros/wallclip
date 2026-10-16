@@ -899,13 +899,17 @@ static char *resolve_slug_collision(PGconn *conn, char *slug,
 	return new_slug;
 }
 
-// Inserts the wallpaper row.
+// Inserts the wallpaper row. A unique violation caused by someone adding the
+// same slug or image since our checks is told apart from other errors.
+enum { INSERT_OK = 0, INSERT_ERROR = -1, INSERT_SLUG_TAKEN = 1,
+	INSERT_DUPLICATE = 2 };
+
 static int insert_wallpaper(PGconn *conn, const struct image_ctx *img,
 		const char *title, const char *slug, const char *thumbnail,
 		const char *mime_type, size_t width, size_t height,
 		const unsigned char *md, const char *embedding_str,
 		const char *created_str) {
-	int rc = -1;
+	int rc = INSERT_ERROR;
 	PGresult *res_insert = NULL;
 	char fsize_str[32], width_str[32], height_str[32];
 	snprintf(fsize_str, sizeof(fsize_str), "%zu", img->entry->fsize);
@@ -930,12 +934,28 @@ static int insert_wallpaper(PGconn *conn, const struct image_ctx *img,
 			param_lengths, param_formats, 0);
 
 	if (PQresultStatus(res_insert) != PGRES_COMMAND_OK) {
+		const char *state = PQresultErrorField(res_insert, PG_DIAG_SQLSTATE);
+		const char *constraint =
+			PQresultErrorField(res_insert, PG_DIAG_CONSTRAINT_NAME);
+
+		if (state && constraint && strcmp(state, "23505") == 0) {
+			if (strcmp(constraint, "wallpapers_slug_key") == 0) {
+				rc = INSERT_SLUG_TAKEN;
+				goto cleanup;
+			}
+			if (strcmp(constraint, "wallpapers_checksum_key") == 0 ||
+					strcmp(constraint, "wallpapers_image_key") == 0) {
+				rc = INSERT_DUPLICATE;
+				goto cleanup;
+			}
+		}
+
 		Errorf(E_FAIL, "insert failed for '%s': %s", img->entry->path,
 				PQresultErrorMessage(res_insert));
 		goto cleanup;
 	}
 
-	rc = 0;
+	rc = INSERT_OK;
 
 cleanup:
 	PQclear(res_insert);
@@ -955,6 +975,7 @@ int process_img(struct image_ctx *img) {
 	char *thumbnail = NULL;
 	char *title = NULL;
 	char *slug = NULL;
+	int ins = INSERT_ERROR;
 
 	if (compute_checksum_and_mime(img->entry->path, img->entry->fsize, md,
 				&md_len, &mime_type) != 0)
@@ -1004,16 +1025,37 @@ int process_img(struct image_ctx *img) {
 	if (!title)
 		goto cleanup;
 
-	slug = slugify(title);
-	if (!slug)
-		goto cleanup;
+	// another process may take the slug between the check and the insert, in
+	// which case the next attempt sees it and picks the following number
+	for (int attempt = 0; attempt < 3; attempt++) {
+		slug = slugify(title);
+		if (!slug)
+			goto cleanup;
 
-	slug = resolve_slug_collision(img->conn, slug, img->entry->path);
-	if (!slug) // already freed by resolve_slug_collision on failure
-		goto cleanup;
+		slug = resolve_slug_collision(img->conn, slug, img->entry->path);
+		if (!slug) // already freed by resolve_slug_collision on failure
+			goto cleanup;
 
-	if (insert_wallpaper(img->conn, img, title, slug, thumbnail, mime_type,
-				width, height, md, embedding_str, created_str) != 0)
+		ins = insert_wallpaper(img->conn, img, title, slug, thumbnail,
+				mime_type, width, height, md, embedding_str, created_str);
+		if (ins != INSERT_SLUG_TAKEN)
+			break;
+
+		Errorf(E_HINT, "slug '%s' was taken meanwhile, retrying", slug);
+		free(slug);
+		slug = NULL;
+	}
+
+	if (ins == INSERT_DUPLICATE) {
+		// added by someone else meanwhile. The thumbnail is kept, it may be
+		// the one their row uses.
+		Errorf(E_WARN, "Skipping %s, duplicate.", img->entry->path);
+		rc = 1;
+		goto cleanup;
+	}
+	if (ins == INSERT_SLUG_TAKEN)
+		Errorf(E_FAIL, "no free slug for '%s'", img->entry->path);
+	if (ins != INSERT_OK)
 		goto cleanup;
 
 	rc = 0;
