@@ -433,6 +433,9 @@ static char *generate_thumbnail(const char *path, size_t *width_out,
 	while (MagickNextImage(magick_wand) != MagickFalse) {
 		double scale = fmin(640.0 / (double)*width_out,
 				360.0 / (double)*height_out);
+		if (scale > 1.0)
+			scale = 1.0;
+
 		size_t new_w = (size_t)(*width_out * scale);
 		size_t new_h = (size_t)(*height_out * scale);
 		if (new_w == 0)
