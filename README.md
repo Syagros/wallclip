@@ -67,6 +67,31 @@ cp .env.example .env && chmod 600 .env
 ```
 Database credentials are zeroed from memory as soon as the PostgreSQL connection is authenticated.
 
+# Using a different model:
+The embedding dimension is read from the model at runtime, but the database column must match it.
+
+1. Convert the model to GGUF for clip.cpp and find its `projection_dim` (in the model's `config.json`; ViT-B/32 is 512, ViT-L/14 is 768).
+2. Create a new database with that dimension (default 512):
+```sh
+createdb wallpapers_new
+psql -d wallpapers_new -v embed_dim=768 -f schema.sql
+```
+3. Point wallclip at both, in `.env` or the environment. `WALLCLIP_ENV_FILE=.env.new wallclip ...` switches setups without editing `.env`:
+```sh
+WALLCLIP_MODEL_PATH=/path/to/new-model.gguf
+WALLCLIP_DB_NAME=wallpapers_new
+```
+4. Add the images again, embeddings from different models are not comparable:
+```sh
+wallclip /path/to/wallpapers/*
+```
+5. Retune `WALLCLIP_SIMILARITY_THRESHOLD`, the default 0.27 was picked for the default model.
+
+Notes:
+* An `embed_dim` that doesn't match the model makes Postgres reject inserts and queries.
+* pgvector's HNSW index supports at most 2000 dimensions.
+* To run the old and new servers side by side, give the new one its own `WALLCLIP_SOCKET_PATH`.
+
 # TODO:
 * Better error handling
 * Make code portable
