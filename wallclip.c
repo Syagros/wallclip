@@ -66,21 +66,19 @@ static void usage(FILE *out) {
 
 int init_setup(PGconn **conn, struct clip_ctx **clip_ctx)
 {
-	int rc = 0;
-
 	*conn = PQconnectdb(conninfo);
 	if (PQstatus(*conn) != CONNECTION_OK) {
 		Errorf(E_CRIT, "connection failed: %s", PQerrorMessage(*conn));
-		rc = -1;
+		return -1;
 	}
 
 	*clip_ctx = clip_model_load(CLIP_MODEL_PATH, 0);
 	if (!*clip_ctx) {
-		Errorf(E_CRIT, "failed to load clip model\n");
-		rc = -1;
+		Errorf(E_CRIT, "failed to load clip model");
+		return -1;
 	}
 
-	return rc;
+	return 0;
 }
 
 int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn,
