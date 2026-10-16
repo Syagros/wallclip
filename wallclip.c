@@ -415,7 +415,29 @@ static ssize_t read_request(int fd, char *buf, size_t size) {
 	return (ssize_t)total;
 }
 
+/*
+ * Makes sure `conn` is usable, resetting it if the server went away (a
+ * restart, a dropped connection). PQreset() reuses the parameters libpq
+ * kept from the original connect, so the credentials scrubbed from our own
+ * memory are not needed. Returns 0 if the connection is usable, -1 if not.
+ */
+static int db_ensure(PGconn *conn) {
+	if (PQstatus(conn) == CONNECTION_OK)
+		return 0;
+
+	Errorf(E_WARN, "database connection lost, reconnecting");
+	PQreset(conn);
+	if (PQstatus(conn) != CONNECTION_OK) {
+		Errorf(E_FAIL, "database reconnect failed: %s", PQerrorMessage(conn));
+		return -1;
+	}
+
+	Errorf(E_HINT, "database reconnected");
+	return 0;
+}
+
 static void handle_client(int client_fd, struct clip_ctx *clip_ctx, PGconn *conn) {
+	int qrc;
 	bool is_http = false;
 	const char *err_status = NULL; // set before goto cleanup on HTTP failures
 	char read_buffer[BUFFER_SIZE];
@@ -462,8 +484,19 @@ static void handle_client(int client_fd, struct clip_ctx *clip_ctx, PGconn *conn
 		goto cleanup;
 	}
 
-	if (query(q, clip_ctx, conn, &matches, &count) != 0) {
-		err_status = "500 Internal Server Error";
+	if (db_ensure(conn) != 0) {
+		err_status = "503 Service Unavailable";
+		goto cleanup;
+	}
+
+	qrc = query(q, clip_ctx, conn, &matches, &count);
+	// a restart between two queries only shows up as a failed query, so
+	// reconnect and retry once
+	if (qrc != 0 && PQstatus(conn) != CONNECTION_OK && db_ensure(conn) == 0)
+		qrc = query(q, clip_ctx, conn, &matches, &count);
+	if (qrc != 0) {
+		err_status = PQstatus(conn) == CONNECTION_OK ?
+			"500 Internal Server Error" : "503 Service Unavailable";
 		goto cleanup;
 	}
 
