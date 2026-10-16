@@ -353,14 +353,15 @@ static void format_created_at(time_t created_at, char *out, size_t out_size) {
 	}
 }
 
-// Creates a resized JPEG thumbnail for the image at `path` inside a
-// `.thumbnails` directory next to it, picking a free "-N" suffixed name if
-// one already exists. On success, fills *width_out/*height_out with the
-// source image's original dimensions and returns a malloc'd thumbnail path
-// (caller frees). Returns NULL on error.
+// Creates a resized thumbnail (fits within 640x360, never upscaled) for the
+// image at `path` inside a `.thumbnails` directory next to it. The thumbnail
+// keeps the source's file name, so ImageMagick writes it in the same format.
+// On success, fills *width_out/*height_out with the source image's original
+// dimensions and returns a malloc'd thumbnail path (caller frees). Returns
+// NULL on error.
 static char *generate_thumbnail(const char *path, size_t *width_out,
 		size_t *height_out) {
-	char *thumbnail = NULL, *path_copy1 = NULL, *path_copy2 = NULL, *fname_noext = NULL;
+	char *thumbnail = NULL, *path_copy1 = NULL, *path_copy2 = NULL;
 	MagickWand *magick_wand = NULL;
 	int ok = 0;
 
@@ -381,40 +382,16 @@ static char *generate_thumbnail(const char *path, size_t *width_out,
 	}
 
 	size_t thumb_len =
-		strlen(fdir) + strlen("/.thumbnails/") + strlen(fname) + 16;
+		strlen(fdir) + strlen("/.thumbnails/") + strlen(fname) + 1;
 	thumbnail = malloc(thumb_len);
 	if (!thumbnail) {
 		Errnof(E_CRIT, "malloc failed for thumbnail path");
 		goto cleanup;
 	}
 
-	// Thumbnails are always re-encoded as JPEG below (MagickSetImageFormat),
-	// so name the thumbnail file .jpg regardless of the source image's own
-	// extension. If a thumbnail with that base name already exists (e.g. two
-	// source files sharing a name but differing in extension), suffix with
-	// -1, -2, ... until a free path is found.
-	fname_noext = strdup(fname);
-	if (!fname_noext) {
-		Errnof(E_CRIT, "strdup failed building thumbnail path");
-		goto cleanup;
-	}
-	char *base_ext = strrchr(fname_noext, '.');
-	if (base_ext && base_ext != fname_noext)
-		*base_ext = '\0';
-
-	int suffix = 0;
-	for (;;) {
-		if (suffix == 0) {
-			snprintf(thumbnail, thumb_len, "%s/.thumbnails/%s.jpg", fdir,
-					fname_noext);
-		} else {
-			snprintf(thumbnail, thumb_len, "%s/.thumbnails/%s-%d.jpg", fdir,
-					fname_noext, suffix);
-		}
-		if (access(thumbnail, F_OK) != 0)
-			break; // path is free
-		suffix++;
-	}
+	// Same file name (hence same extension) as the source, so the thumbnail
+	// is written in the source's format.
+	snprintf(thumbnail, thumb_len, "%s/.thumbnails/%s", fdir, fname);
 
 	magick_wand = NewMagickWand();
 	if (MagickReadImage(magick_wand, path) == MagickFalse) {
@@ -454,15 +431,6 @@ static char *generate_thumbnail(const char *path, size_t *width_out,
 		}
 	}
 
-	if (MagickSetImageFormat(magick_wand, "JPEG") == MagickFalse) {
-		ExceptionType severity;
-		char *magick_err = MagickGetException(magick_wand, &severity);
-		Errorf(E_FAIL, "MagickSetImageFormat failed for '%s': %s", path,
-				magick_err);
-		magick_err = (char *)MagickRelinquishMemory(magick_err);
-		goto cleanup;
-	}
-
 	if (MagickWriteImages(magick_wand, thumbnail, MagickTrue) == MagickFalse) {
 		ExceptionType severity;
 		char *magick_err = MagickGetException(magick_wand, &severity);
@@ -477,7 +445,6 @@ static char *generate_thumbnail(const char *path, size_t *width_out,
 cleanup:
 	free(path_copy1);
 	free(path_copy2);
-	free(fname_noext);
 	if (magick_wand)
 		DestroyMagickWand(magick_wand);
 	if (!ok) {
