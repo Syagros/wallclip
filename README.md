@@ -67,6 +67,26 @@ cp .env.example .env && chmod 600 .env
 ```
 Database credentials are zeroed from memory as soon as the PostgreSQL connection is authenticated.
 
+## Database
+wallclip needs a PostgreSQL database with the pgvector extension and the table from `schema.sql`. The role and database names below match `.env.example`:
+```sh
+sudo -u postgres createuser --pwprompt wallclip
+sudo -u postgres createdb -O wallclip wallclip
+sudo -u postgres psql -d wallclip -c 'CREATE EXTENSION IF NOT EXISTS vector'
+psql -h localhost -U wallclip -d wallclip -f schema.sql
+```
+The extension is created as a superuser first, since the `wallclip` role usually can't. Running `schema.sql` as `wallclip` makes it the owner of the table. For a model that isn't 512-dimensional, pass `-v embed_dim=N` (see below).
+
+Then set the connection in `.env`:
+```sh
+WALLCLIP_DB_NAME=wallclip
+WALLCLIP_DB_USER=wallclip
+WALLCLIP_DB_PASSWORD=...
+# WALLCLIP_DB_HOST=/var/run/postgresql   # socket directory or hostname
+# WALLCLIP_DB_PORT=5432
+```
+Unset or empty values fall back to libpq's defaults and the `PG*` variables (`PGHOST`, `PGPASSFILE`, ...), so peer authentication over the local socket works with only `WALLCLIP_DB_NAME` set.
+
 # Using a different model:
 The embedding dimension is read from the model at runtime, but the database column must match it.
 
