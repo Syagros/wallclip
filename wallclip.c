@@ -1021,7 +1021,6 @@ int write_query_socket(char *query, int fd) {
 #if !defined(DEBUG)
 		fprintf(stderr, "wallclip: Failed to write to socket.\n");
 #endif
-		close(fd);
 		return 1;
 	}
 	return 0;
@@ -1205,7 +1204,7 @@ int main(int argc, char *argv[]) {
 		}
 
 		if (write_query_socket(query_str, fd) != 0) {
-			fd = -1; // closed by write_query_socket
+			close(fd);
 			goto cleanup;
 		}
 
