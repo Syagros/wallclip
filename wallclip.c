@@ -841,7 +841,7 @@ cleanup:
 
 int main(int argc, char *argv[]) {
 	int rc = -1;
-	bool is_server = (argc == 1);
+	bool is_server = false;
 	bool is_query = false;
 	int c;
 	int nfiles;
@@ -896,12 +896,6 @@ int main(int argc, char *argv[]) {
 		fprintf(stderr, "wallclip: %s\n", conflict);
 		usage(stderr);
 		rc = -2;
-		goto cleanup;
-	}
-
-	if (!is_server && !is_query && nfiles == 0) {
-		usage(stdout);
-		rc = 0;
 		goto cleanup;
 	}
 
