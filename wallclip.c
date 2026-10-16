@@ -505,7 +505,7 @@ static char *build_title(const char *path) {
 // (caller frees), or NULL on error.
 static char *slugify(const char *title) {
 	size_t title_len = strlen(title);
-	char *slug = malloc(title_len + 1);
+	char *slug = malloc(title_len + 16); // room for the "untitled" fallback
 	if (!slug) {
 		Errnof(E_CRIT, "malloc failed for slug");
 		return NULL;
@@ -525,6 +525,8 @@ static char *slugify(const char *title) {
 	if (out > slug && *(out - 1) == '-')
 		out--;
 	*out = '\0';
+	if (out == slug)
+		strcpy(slug, "untitled");
 	return slug;
 }
 
