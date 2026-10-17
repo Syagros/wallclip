@@ -1,5 +1,5 @@
-# WallClip (Wallpaper Gallery with CLIP integration) [WiP]
-WallClip is written for serving Wallpapers using any web server that can use Unix Domain Sockets. It is currently dependent on a non-standard Linux only header (`_GNU_SOURCE`) but I might make it independent of it if I continue working on it. 
+# WallClip (Generic Gallery with CLIP integration) [WiP]
+WallClip is written for serving images using any web server that can use Unix Domain Sockets. It is currently dependent on a non-standard Linux only header (`_GNU_SOURCE`) but I might make it independent of it if I continue working on it. 
 
 # Depends on:
 * [clip.cpp](https://github.com/monatis/clip.cpp)
@@ -90,20 +90,20 @@ Unset or empty values fall back to libpq's defaults and the `PG*` variables (`PG
 # Using a different model:
 The embedding dimension is read from the model at runtime, but the database column must match it.
 
-1. Convert the model to GGUF for clip.cpp and find its `projection_dim` (in the model's `config.json`; ViT-B/32 is 512, ViT-L/14 is 768).
+1. Convert the model to GGUF for clip.cpp and find its `projection_dim` (in the model's `config.json`).
 2. Create a new database with that dimension (default 512):
 ```sh
-createdb wallpapers_new
-psql -d wallpapers_new -v embed_dim=768 -f schema.sql
+createdb gallery_db_768
+psql -d gallery_db_768 -v embed_dim=768 -f schema.sql
 ```
 3. Point wallclip at both, in `.env` or the environment. `WALLCLIP_ENV_FILE=.env.new wallclip ...` switches setups without editing `.env`:
 ```sh
-WALLCLIP_MODEL_PATH=/path/to/new-model.gguf
-WALLCLIP_DB_NAME=wallpapers_new
+WALLCLIP_MODEL_PATH=/path/to/new-model-of-768-dims.gguf
+WALLCLIP_DB_NAME=gallery_db_768
 ```
 4. Add the images again, embeddings from different models are not comparable:
 ```sh
-wallclip /path/to/wallpapers/*
+wallclip /path/to/images/*
 ```
 5. Retune `WALLCLIP_SIMILARITY_THRESHOLD`, the default 0.27 was picked for the default model.
 

@@ -253,7 +253,7 @@ int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn,
 
 	const char *param_values[3] = { embedding_str, dist_buf, limit_buf };
 	const char *sql =
-		"SELECT thumbnail FROM wallpapers "
+		"SELECT thumbnail FROM items "
 		"WHERE (embedding <=> $1::vector) < $2::float8 "
 		"ORDER BY embedding <=> $1::vector "
 		"LIMIT $3::int";
@@ -656,7 +656,7 @@ static int check_duplicate(PGconn *conn, const unsigned char *md,
 
 	// a row with the same checksum sorts first
 	res = PQexecParams(conn,
-			"SELECT checksum = $1 FROM wallpapers "
+			"SELECT checksum = $1 FROM items "
 			"WHERE checksum = $1 OR image = $2 ORDER BY 1 DESC LIMIT 1",
 			2, NULL, param_values, param_lengths, param_formats, 0);
 	if (PQresultStatus(res) != PGRES_TUPLES_OK) {
@@ -847,7 +847,7 @@ static char *resolve_slug_collision(PGconn *conn, char *slug,
 		const char *path) {
 	PGresult *check_res = NULL;
 	const char *check_sql =
-		"SELECT slug FROM wallpapers WHERE slug = $1 OR slug LIKE $1 || '-%'";
+		"SELECT slug FROM items WHERE slug = $1 OR slug LIKE $1 || '-%'";
 	const char *check_params[1] = {slug};
 
 	check_res = PQexecParams(conn, check_sql, 1, NULL, check_params, NULL,
@@ -899,12 +899,12 @@ static char *resolve_slug_collision(PGconn *conn, char *slug,
 	return new_slug;
 }
 
-// Inserts the wallpaper row. A unique violation caused by someone adding the
+// Inserts the item row. A unique violation caused by someone adding the
 // same slug or image since our checks is told apart from other errors.
 enum { INSERT_OK = 0, INSERT_ERROR = -1, INSERT_SLUG_TAKEN = 1,
 	INSERT_DUPLICATE = 2 };
 
-static int insert_wallpaper(PGconn *conn, const struct image_ctx *img,
+static int insert_item(PGconn *conn, const struct image_ctx *img,
 		const char *title, const char *slug, const char *thumbnail,
 		const char *mime_type, size_t width, size_t height,
 		const unsigned char *md, const char *embedding_str,
@@ -925,7 +925,7 @@ static int insert_wallpaper(PGconn *conn, const struct image_ctx *img,
 	int param_formats[11] = {0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0}; // md is binary
 
 	const char *insert =
-		"INSERT INTO wallpapers "
+		"INSERT INTO items "
 		"(title, slug, image, thumbnail, mime_type, file_size, width, "
 		"height, checksum, embedding, created_at) "
 		"VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)";
@@ -939,12 +939,12 @@ static int insert_wallpaper(PGconn *conn, const struct image_ctx *img,
 			PQresultErrorField(res_insert, PG_DIAG_CONSTRAINT_NAME);
 
 		if (state && constraint && strcmp(state, "23505") == 0) {
-			if (strcmp(constraint, "wallpapers_slug_key") == 0) {
+			if (strcmp(constraint, "items_slug_key") == 0) {
 				rc = INSERT_SLUG_TAKEN;
 				goto cleanup;
 			}
-			if (strcmp(constraint, "wallpapers_checksum_key") == 0 ||
-					strcmp(constraint, "wallpapers_image_key") == 0) {
+			if (strcmp(constraint, "items_checksum_key") == 0 ||
+					strcmp(constraint, "items_image_key") == 0) {
 				rc = INSERT_DUPLICATE;
 				goto cleanup;
 			}
@@ -1036,7 +1036,7 @@ int process_img(struct image_ctx *img) {
 		if (!slug) // already freed by resolve_slug_collision on failure
 			goto cleanup;
 
-		ins = insert_wallpaper(img->conn, img, title, slug, thumbnail,
+		ins = insert_item(img->conn, img, title, slug, thumbnail,
 				mime_type, width, height, md, embedding_str, created_str);
 		if (ins != INSERT_SLUG_TAKEN)
 			break;

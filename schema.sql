@@ -7,7 +7,7 @@ CREATE EXTENSION IF NOT EXISTS vector;
 \set embed_dim 512
 \endif
 
-CREATE TABLE wallpapers (
+CREATE TABLE items (
     id              bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     title           text NOT NULL,
     slug            text NOT NULL UNIQUE,
@@ -23,5 +23,5 @@ CREATE TABLE wallpapers (
     created_at      timestamptz NOT NULL
 );
 
-CREATE INDEX idx_wallpapers_created ON wallpapers (created_at DESC);
-CREATE INDEX idx_wallpapers_embedding ON wallpapers USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX idx_items_created ON items (created_at DESC);
+CREATE INDEX idx_items_embedding ON items USING hnsw (embedding vector_cosine_ops);
