@@ -114,5 +114,4 @@ Notes:
 
 # TODO:
 * Make code portable
-* Better slugify()
 * To implement -d/--delete: Rewrite the read/write logic of socket functions
