@@ -1042,7 +1042,6 @@ static int delete_item(PGconn *conn, const char *arg) {
 	}
 	in_txn = false;
 
-	// the row is gone for good, the files are ours to remove now
 	if (unlink(image) != 0 && errno != ENOENT)
 		Errnof(E_WARN, "failed to unlink '%s'", image);
 	if (unlink(thumbnail) != 0 && errno != ENOENT)
@@ -1322,7 +1321,6 @@ int main(int argc, char *argv[]) {
 	while ((c = getopt_long(argc, argv, "d:q:vh", long_options, NULL)) != -1) {
 		switch (c) {
 			case 'd': {
-				// -d is repeatable, one path per flag
 				char **next = realloc(del_paths,
 						(size_t)(ndel + 1) * sizeof(*del_paths));
 				if (!next) {
@@ -1359,7 +1357,7 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	/* remaining non-option args are the files to process */
+	// remaining non-option args are the files to process
 	nfiles = argc - optind;
 	is_server = !is_query && !is_delete && nfiles == 0;
 
