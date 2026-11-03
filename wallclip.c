@@ -534,8 +534,20 @@ static void handle_client(int client_fd, struct clip_ctx *clip_ctx, PGconn *conn
 			err_status = "500 Internal Server Error";
 			goto cleanup;
 		}
-		for (int i = 0; i < count; i++)
-			fprintf(f, "%s\n", matches[i]);
+		for (int i = 0; i < count; i++) {
+			// The page needs every filename twice (link href + img src)
+			// and nginx sub_filter cannot duplicate text, so the HTTP
+			// response carries the full-res path, a literal tab, then
+			// the thumbnail path, one pair per line. The raw socket
+			// protocol (below) stays single-path.
+			const char *seg = strstr(matches[i], "/.thumbnails/");
+			if (seg)
+				fprintf(f, "%.*s/%s	%s\n", (int)(seg - matches[i]),
+						matches[i], seg + strlen("/.thumbnails/"),
+						matches[i]);
+			else
+				fprintf(f, "%s	%s\n", matches[i], matches[i]);
+		}
 		if (fclose(f) != 0) {
 			Errnof(E_FAIL, "fclose() failed on the response buffer");
 			err_status = "500 Internal Server Error";

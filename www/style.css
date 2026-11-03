@@ -181,6 +181,8 @@ body.search main.grid img {
   width: 100%;
   aspect-ratio: 16 / 10;
 }
+/* the imgs are grid items through their wrapping link */
+body.search main.grid a { min-width: 0; }
 body.home main.grid pre img {
   float: left;
   width: calc(20% - 8px);
@@ -197,12 +199,12 @@ body.home main.grid pre img {
   body.home main.grid pre img { width: calc(50% - 8px); }
 }
 main.grid img:hover { transform: scale(1.03); }
-/* zero results: the socket returns an empty body, the img src stays empty */
-main.grid img[src=""] { display: none; }
+/* zero results: the socket returns an empty body, the link href stays empty */
+main.grid a[href=""] { display: none; }
 /* empty-state markers, scoped per page: on the search page an empty socket
-   body leaves img[src=""]; on the landing an empty gallery leaves the
+   body leaves a[href=""]; on the landing an empty gallery leaves the
    <pre> without any img at all. */
-body.search main.grid:has(img[src=""])::after {
+body.search main.grid:has(a[href=""])::after {
   content: "No results";
   grid-column: 1 / -1;
   text-align: center;

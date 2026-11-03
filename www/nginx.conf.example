@@ -82,7 +82,15 @@ server {
 
         sub_filter_types *;
         sub_filter_once off;
-        sub_filter '\n/mnt/HDD/Wallpapers-Flat/' '"><img loading="lazy" src="/files/';
+        # the socket (HTTP mode) answers "<full-res>\t<thumbnail>" per line:
+        # the page needs the filename twice (link href + img src) and
+        # sub_filter cannot duplicate text, so each line carries both paths
+        # tab -> close the href, open the img (a literal tab: nginx does
+        # not parse \t escapes in quoted strings, only \n)
+        sub_filter '	/mnt/HDD/Wallpapers-Flat/' '"><img loading="lazy" src="/files/';
+        # newline -> close the link, open the next one
+        sub_filter '\n/mnt/HDD/Wallpapers-Flat/' '"></a><a target="_blank" rel="noopener" href="/files/';
+        # the first line's full-res path is rewritten by itself
         sub_filter '/mnt/HDD/Wallpapers-Flat/' '/files/';
         # known quirk: nginx's sub module flushes the final bytes of a
         # proxied body without substituting, so the last line's trailing
