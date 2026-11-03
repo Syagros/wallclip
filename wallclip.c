@@ -81,7 +81,8 @@ static void usage(FILE *out) {
 			"  -h, --help\n");
 }
 
-int init_setup(PGconn **conn, struct clip_ctx **clip_ctx)
+// Connects to the database. Returns 0 on success, -1 on error.
+static int init_db(PGconn **conn)
 {
 	// unset/empty values are ignored by libpq, so it falls back to its own
 	// defaults and PG* variables
@@ -107,6 +108,14 @@ int init_setup(PGconn **conn, struct clip_ctx **clip_ctx)
 		Errorf(E_CRIT, "connection failed: %s", PQerrorMessage(*conn));
 		return -1;
 	}
+
+	return 0;
+}
+
+int init_setup(PGconn **conn, struct clip_ctx **clip_ctx)
+{
+	if (init_db(conn) < 0)
+		return -1;
 
 	*clip_ctx = clip_model_load(model_path, 0);
 	if (!*clip_ctx) {
@@ -962,6 +971,121 @@ cleanup:
 	return rc;
 }
 
+/*
+ * Deletes the row for the image named by `arg` and, only after the delete is
+ * committed, unlinks the source file and its thumbnail. Matches by the
+ * realpath of `arg`, falling back to the file's checksum when the row was
+ * added under a different path spelling (e.g. via a symlink). Files are
+ * touched only after a successful commit: a failed delete must leave the
+ * database pointing at intact files, while orphaned files are recoverable by
+ * running the delete again. A file that is already gone is not an error.
+ * Returns 0 on success (row deleted), 1 if not in the database, -1 on error.
+ */
+static int delete_item(PGconn *conn, const char *arg) {
+	int rc = -1;
+	bool in_txn = false;
+	char *path = realpath(arg, NULL); // NULL if the file is gone
+	char *image = NULL, *thumbnail = NULL, *mime_type = NULL;
+	unsigned char md[32];
+	unsigned int md_len;
+	PGresult *res = NULL;
+	bool found = false;
+
+	res = PQexec(conn, "BEGIN");
+	if (PQresultStatus(res) != PGRES_COMMAND_OK) {
+		Errorf(E_FAIL, "BEGIN failed for '%s': %s", arg, PQerrorMessage(conn));
+		goto cleanup;
+	}
+	in_txn = true;
+	PQclear(res);
+
+	// lock the row so a concurrent add of the same path waits instead of
+	// re-inserting it while we are deleting
+	const char *pv_path[1] = { path ? path : arg };
+	res = PQexecParams(conn,
+			"SELECT image, thumbnail FROM items WHERE image = $1 FOR UPDATE",
+			1, NULL, pv_path, NULL, NULL, 0);
+	if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+		Errorf(E_FAIL, "delete lookup failed for '%s': %s", arg,
+				PQerrorMessage(conn));
+		goto cleanup;
+	}
+	found = PQntuples(res) > 0;
+
+	if (!found && path) {
+		// the row may be stored under a different path spelling; if the file
+		// still exists, match it by contents instead
+		struct stat st;
+		if (stat(path, &st) == 0 && S_ISREG(st.st_mode) && st.st_size > 0 &&
+				compute_checksum_and_mime(path, (size_t)st.st_size, md, &md_len,
+					&mime_type) == 0) {
+			PQclear(res);
+			const char *pv_md[1] = { (const char *)md };
+			int pl_md[1] = { 32 };
+			int pf_md[1] = { 1 }; // checksum is binary
+			res = PQexecParams(conn,
+					"SELECT image, thumbnail FROM items "
+					"WHERE checksum = $1 FOR UPDATE",
+					1, NULL, pv_md, pl_md, pf_md, 0);
+			if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+				Errorf(E_FAIL, "checksum lookup failed for '%s': %s", arg,
+						PQerrorMessage(conn));
+				goto cleanup;
+			}
+			found = PQntuples(res) > 0;
+		}
+	}
+
+	if (!found) {
+		Errorf(E_FAIL, "'%s': not in database", arg);
+		rc = 1;
+		goto cleanup;
+	}
+
+	// the strings are needed after res is cleared for the DELETE
+	image = strdup(PQgetvalue(res, 0, 0));
+	thumbnail = strdup(PQgetvalue(res, 0, 1));
+	PQclear(res);
+	res = NULL;
+	if (!image || !thumbnail) {
+		Errnof(E_FAIL, "strdup failed for delete");
+		goto cleanup;
+	}
+
+	const char *pv_del[1] = { image };
+	res = PQexecParams(conn, "DELETE FROM items WHERE image = $1",
+			1, NULL, pv_del, NULL, NULL, 0);
+	if (PQresultStatus(res) != PGRES_COMMAND_OK) {
+		Errorf(E_FAIL, "delete failed for '%s': %s", arg, PQerrorMessage(conn));
+		goto cleanup;
+	}
+	PQclear(res);
+	res = PQexec(conn, "COMMIT");
+	if (PQresultStatus(res) != PGRES_COMMAND_OK) {
+		Errorf(E_FAIL, "COMMIT failed for '%s': %s", arg, PQerrorMessage(conn));
+		goto cleanup;
+	}
+	in_txn = false;
+
+	// the row is gone for good, the files are ours to remove now
+	if (unlink(image) != 0 && errno != ENOENT)
+		Errnof(E_WARN, "failed to unlink '%s'", image);
+	if (unlink(thumbnail) != 0 && errno != ENOENT)
+		Errnof(E_WARN, "failed to unlink thumbnail '%s'", thumbnail);
+
+	rc = 0;
+
+cleanup:
+	if (in_txn)
+		PQclear(PQexec(conn, "ROLLBACK"));
+	PQclear(res);
+	free(path);
+	free(image);
+	free(thumbnail);
+	free(mime_type);
+	return rc;
+}
+
 int process_img(struct image_ctx *img) {
 	int rc = -1;
 	unsigned char md[32];
@@ -1207,11 +1331,14 @@ int main(int argc, char *argv[]) {
 	int rc = EXIT_FAILURE; // the exit code, fatal errors keep it
 	bool is_server = false;
 	bool is_query = false;
+	bool is_delete = false;
 	bool wand_ready = false;
 	int c;
 	int nfiles;
 	const char *conflict = NULL;
 	char *query_str = NULL;
+	char **del_paths = NULL;
+	int ndel = 0;
 	PGconn *conn = NULL;
 	struct clip_ctx *clip_ctx = NULL;
 	struct file_list *file_list = NULL;
@@ -1220,11 +1347,20 @@ int main(int argc, char *argv[]) {
 
 	while ((c = getopt_long(argc, argv, "d:q:vh", long_options, NULL)) != -1) {
 		switch (c) {
-			case 'd':
-				/* TODO: implement delete */
-				fprintf(stderr, "wallclip: --delete/-d is not implemented yet\n");
-				rc = EXIT_USAGE;
-				goto cleanup;
+			case 'd': {
+				// -d is repeatable, one path per flag
+				char **next = realloc(del_paths,
+						(size_t)(ndel + 1) * sizeof(*del_paths));
+				if (!next) {
+					Errnof(E_CRIT, "realloc failed for delete paths");
+					rc = EXIT_FAILURE;
+					goto cleanup;
+				}
+				del_paths = next;
+				del_paths[ndel++] = optarg;
+				is_delete = true;
+				break;
+			}
 			case 'q':
 				is_query = true;
 				query_str = optarg;
@@ -1251,10 +1387,18 @@ int main(int argc, char *argv[]) {
 
 	/* remaining non-option args are the files to process */
 	nfiles = argc - optind;
-	is_server = !is_query && nfiles == 0;
+	is_server = !is_query && !is_delete && nfiles == 0;
 
 	if (is_query && nfiles > 0) {
 		conflict = "--query cannot be combined with file arguments";
+		fprintf(stderr, "wallclip: %s\n", conflict);
+		usage(stderr);
+		rc = EXIT_USAGE;
+		goto cleanup;
+	}
+
+	if (is_delete && (is_query || nfiles > 0)) {
+		conflict = "--delete cannot be combined with --query or file arguments";
 		fprintf(stderr, "wallclip: %s\n", conflict);
 		usage(stderr);
 		rc = EXIT_USAGE;
@@ -1267,6 +1411,20 @@ int main(int argc, char *argv[]) {
 	sockp = strdup(socket_path);
 	if (!sockp) {
 		Errnof(E_CRIT, "strdup failed");
+		goto cleanup;
+	}
+
+	if (is_delete) {
+		// no CLIP model or MagickWand needed for deleting
+		if (init_db(&conn) < 0)
+			goto cleanup;
+
+		int failed = 0;
+		for (int i = 0; i < ndel; i++)
+			if (delete_item(conn, del_paths[i]) != 0)
+				failed++;
+
+		rc = failed ? EXIT_FAILURE : EXIT_SUCCESS;
 		goto cleanup;
 	}
 
@@ -1486,5 +1644,6 @@ cleanup:
 		free(file_list->entries);
 		free(file_list);
 	}
+	free(del_paths);
 	return rc;
 }
