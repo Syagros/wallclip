@@ -73,7 +73,7 @@ header {
   border-bottom: 1px solid var(--border);
 }
 .brand {
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 600;
   letter-spacing: 0.04em;
   color: var(--muted);
@@ -106,7 +106,7 @@ input[type="search"] {
   border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--text);
-  font-size: 14px;
+  font-size: 0.875rem;
   outline: none;
   transition: border-color .15s;
 }
@@ -118,7 +118,7 @@ button[type="submit"] {
   border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--text);
-  font-size: 14px;
+  font-size: 0.875rem;
   cursor: pointer;
   transition: border-color .15s;
 }
@@ -126,7 +126,7 @@ button[type="submit"]:hover { border-color: var(--hover); }
 /* the checkbox-driven light/dark toggle (label in the header) */
 label[for="theme"] {
   padding: 6px 12px;
-  font-size: 15px;
+  font-size: 0.9375rem;
   line-height: 1.2;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -167,7 +167,7 @@ label[for="theme"]::before { content: var(--icon); }
   right: 8px;
   bottom: 8px;
   padding: 6px 10px;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--text);
   background: var(--backdrop);
   border: 1px solid var(--border);
@@ -185,6 +185,6 @@ label[for="theme"]::before { content: var(--icon); }
   text-align: center;
   color: var(--muted);
   padding: 80px 0;
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 @media (hover: none) { .dl { opacity: 1; transform: none; } }
