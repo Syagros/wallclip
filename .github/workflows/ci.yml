@@ -1,0 +1,54 @@
+name: ci
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # Platform tests: no clip.cpp / ImageMagick / PostgreSQL needed, so they are fast.
+  unit-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make test
+      - run: make test-asan
+
+  unit-macos:
+    runs-on: macos-latest   # Apple Silicon
+    steps:
+      - uses: actions/checkout@v4
+      - run: make test
+      - run: make test-asan
+
+  unit-freebsd:
+    runs-on: ubuntu-latest  # FreeBSD runs in a VM on this runner
+    steps:
+      - uses: actions/checkout@v4
+      - uses: vmactions/freebsd-vm@v1
+        with:
+          release: "14.3"   # bump to a current FreeBSD release if this one is retired
+          usesh: true
+          prepare: pkg install -y gmake
+          run: |
+            uname -a
+            gmake test
+
+  # Full build of wallclip itself on macOS (slow: builds clip.cpp).
+  build-macos:
+    runs-on: macos-latest
+    needs: unit-macos
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: brew install pkg-config cmake imagemagick libmagic openssl@3 libpq
+      - name: clip.cpp
+        run: |
+          git clone --recurse-submodules https://github.com/monatis/clip.cpp $HOME/clip.cpp
+          cd $HOME/clip.cpp && mkdir build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release && make -j$(sysctl -n hw.ncpu)
+      - name: wallclip
+        run: |
+          O=$(brew --prefix openssl@3); P=$(brew --prefix libpq); M=$(brew --prefix libmagic)
+          make compile CLIP_DIR=$HOME/clip.cpp \
+            CC="cc -I$O/include -L$O/lib -I$P/include -L$P/lib -I$M/include -L$M/lib"
+          ./wallclip -h

@@ -17,7 +17,7 @@ endif
 TARGET = wallclip
 SRC = wallclip.c env-loader.c
 
-.PHONY: all debug install clean
+.PHONY: all debug install clean test test-asan
 
 all: clean compile install
 
@@ -30,5 +30,19 @@ debug: $(SRC)
 install:
 	install -m 0755 $(TARGET) $(DESTDIR)$(PREFIX)/bin/$(TARGET)
 
+TEST_SRC = tests/test_platform.c
+TEST_DEPS = $(TEST_SRC) env-loader.c env-loader.h log.h platform.h
+TEST_CFLAGS = -Wall -Wextra -g
+
+# Platform unit tests. They need no clip.cpp, ImageMagick or PostgreSQL.
+# On FreeBSD run them with gmake, this makefile uses GNU make syntax.
+test: $(TEST_DEPS)
+	$(CC) $(TEST_CFLAGS) -O1 -o tests/test_platform $(TEST_SRC)
+	./tests/test_platform
+
+test-asan: $(TEST_DEPS)
+	$(CC) $(TEST_CFLAGS) -O0 -fsanitize=address,undefined -fno-omit-frame-pointer -o tests/test_platform_asan $(TEST_SRC)
+	./tests/test_platform_asan
+
 clean:
-	rm -f $(TARGET)
+	rm -f $(TARGET) tests/test_platform tests/test_platform_asan

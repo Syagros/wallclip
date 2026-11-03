@@ -27,6 +27,7 @@
 #include <unistd.h>
 #include <getopt.h>
 #include <poll.h>
+#include "platform.h"
 
 #define EXIT_USAGE 2 // bad command line, EXIT_FAILURE (1) is any other failure
 #define BUFFER_SIZE 4096
@@ -1347,23 +1348,6 @@ static int load_config(int cli_verbosity) {
 	if (verbosity > 3)
 		verbosity = 3;
 	return 0;
-}
-
-// Birth time of `path` with per-OS support and an mtime fallback for
-// filesystems without one.
-static time_t file_birthtime(const struct stat *st, const char *path) {
-#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || \
-		defined(__OpenBSD__) || defined(__DragonFly__)
-	if (st->st_birthtime > 0)
-		return st->st_birthtime;
-#else
-	struct statx stx;
-	if (statx(AT_FDCWD, path, 0, STATX_BTIME, &stx) == 0 &&
-			(stx.stx_mask & STATX_BTIME)) {
-		return stx.stx_btime.tv_sec;
-	}
-#endif
-	return st->st_mtime;
 }
 
 int main(int argc, char *argv[]) {

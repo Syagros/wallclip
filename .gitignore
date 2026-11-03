@@ -5,3 +5,5 @@ cancer/
 samples/
 test/
 .env
+tests/test_platform
+tests/test_platform_asan
