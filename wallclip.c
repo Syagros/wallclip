@@ -976,16 +976,14 @@ cleanup:
 /*
  * delete_item: delete the row for the image named by `arg`, then unlink the
  * image and its thumbnail — the files only after the row delete commits, so
- * a failure orphans files, never rows. Matches by realpath, then checksum;
- * a gone file with no row is a no-op. 0 ok, 1 not in database, -1 error.
+ * a failure orphans files, never rows. Matches by the stored path; a
+ * gone file with no row is a no-op. 0 ok, 1 not in database, -1 error.
  */
 static int delete_item(PGconn *conn, const char *arg) {
 	int rc = -1;
 	bool in_txn = false;
 	char *path = realpath(arg, NULL); // NULL if the file is gone
-	char *image = NULL, *thumbnail = NULL, *mime_type = NULL;
-	unsigned char md[32];
-	unsigned int md_len;
+	char *image = NULL, *thumbnail = NULL;
 	PGresult *res = NULL;
 	bool found = false;
 
@@ -1009,30 +1007,6 @@ static int delete_item(PGconn *conn, const char *arg) {
 		goto cleanup;
 	}
 	found = PQntuples(res) > 0;
-
-	if (!found && path) {
-		// the row may be stored under a different path spelling; if the file
-		// still exists, match it by contents instead
-		struct stat st;
-		if (stat(path, &st) == 0 && S_ISREG(st.st_mode) && st.st_size > 0 &&
-				compute_checksum_and_mime(path, (size_t)st.st_size, md, &md_len,
-					&mime_type) == 0) {
-			PQclear(res);
-			const char *pv_md[1] = { (const char *)md };
-			int pl_md[1] = { 32 };
-			int pf_md[1] = { 1 }; // checksum is binary
-			res = PQexecParams(conn,
-					"SELECT image, thumbnail FROM items "
-					"WHERE checksum = $1 FOR UPDATE",
-					1, NULL, pv_md, pl_md, pf_md, 0);
-			if (PQresultStatus(res) != PGRES_TUPLES_OK) {
-				Errorf(E_FAIL, "checksum lookup failed for '%s': %s", arg,
-						PQerrorMessage(conn));
-				goto cleanup;
-			}
-			found = PQntuples(res) > 0;
-		}
-	}
 
 	if (!found) {
 		if (path)
@@ -1083,7 +1057,6 @@ cleanup:
 	free(path);
 	free(image);
 	free(thumbnail);
-	free(mime_type);
 	return rc;
 }
 
