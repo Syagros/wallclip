@@ -38,10 +38,12 @@ location /wallpapers/ {
     # grid + search results: images of the gallery
     sub_filter 'href="/files/'  'href="/wallpapers/files/';
     sub_filter 'src="/files/'   'src="/wallpapers/files/';
-    # page chrome: stylesheet links, the search form, the brand link
+    # page chrome: stylesheet links, the search form, the brand link, and
+    # the theme picker's own GET form (its action must stay under /wallpapers/)
     sub_filter 'href="/style.css"'  'href="/wallpapers/style.css"';
     sub_filter 'href="/themes.css"' 'href="/wallpapers/themes.css"';
     sub_filter 'action="/search"'   'action="/wallpapers/search"';
+    sub_filter 'action="/"'         'action="/wallpapers/"';
     sub_filter 'href="/search"'     'href="/wallpapers/search"';
     sub_filter 'href="/"'           'href="/wallpapers/"';
 }
