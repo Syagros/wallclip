@@ -10,6 +10,12 @@
 # public vhost proxies https://voidx0.com/wallpapers/ to that anubis
 # instance, rewriting the absolute paths into /wallpapers/... on the way
 # out (see nginx-public.conf.example). No njs setup needed.
+#
+# Directives below outside the server block (the map, the cache path) sit
+# in the http context: sites-enabled files are included from nginx.conf's
+# http block. sudo mkdir -p /var/cache/nginx/wallclip before first use.
+proxy_cache_path /var/cache/nginx/wallclip levels=1:2 keys_zone=wc_q:1m
+                 inactive=10m max_size=64m;
 
 # The picker submits nothing but ?theme=, so the literal $args strings are
 # exact matches: "theme=" means Default was picked, "theme=<slug>" a theme.
@@ -30,6 +36,13 @@ server {
     listen 127.0.0.1:8080;
 
     root /home/oc/Projects/wallclip/www;
+
+    # no JavaScript anywhere, so a source-allowlist CSP is free to set;
+    # must be mirrored in the public vhost (response headers pass through
+    # anubis unchanged, but the public layer should not rely on that).
+    add_header Content-Security-Policy
+        "default-src 'self'; img-src 'self'; style-src 'self'; frame-ancestors 'none'";
+    server_tokens off;
 
     ssi on;
     add_header Set-Cookie $wc_theme_cookie; # empty map value: no header
@@ -65,6 +78,12 @@ server {
         sub_filter '">'        '"><img loading="lazy" src="/files/.thumbnails/';
         sub_filter '</a>'      '"></a><span hidden>';
         sub_filter '\r\n'      '</span>\r\n';
+        # known gap: autoindex HTML-escapes the name inside href="..." but
+        # does not URL-encode it, so the spliced src="..." carries raw
+        # spaces (and href keeps them too). sub_filter cannot percent-encode,
+        # so this stays; browsers resolve spaces in URLs fine, and quote
+        # safety comes from the HTML escaping. Do not add filenames with
+        # quotes anyway: wallclip's add rejects them at the source.
     }
 
     # search results: internal proxy for the socket, which answers
@@ -79,6 +98,17 @@ server {
         rewrite ^/_q/(.*)$ /$1 break;
         proxy_pass http://unix:/run/wallclip/socket:/;
         proxy_set_header Accept-Encoding "";
+
+        # the daemon runs a CLIP embedding per query, so identical searches
+        # are answered from cache instead of re-burning CPU. Keyed on the
+        # subrequest URI (/_q/<query>): $arg_q is empty inside an SSI
+        # include subrequest, and keying on it made every search share one
+        # cache entry. Only 200s are cached — errors are recomputed, and an
+        # empty result is cached under its own key, so "No results" renders
+        # for that query alone.
+        proxy_cache wc_q;
+        proxy_cache_key "$uri";
+        proxy_cache_valid 200 10m;
 
         sub_filter_types *;
         sub_filter_once off;

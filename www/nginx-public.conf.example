@@ -22,6 +22,15 @@
 #           server unix:/run/anubis_wallclip/anubis.sock;
 #           keepalive 2;
 #       }
+#   - rate-limit zone, http context: this file's locations are dropped into
+#     a server block, so the zone cannot live here. Add it inline in the
+#     http block of /etc/nginx/nginx.conf, next to the other limit_req_zone
+#     definitions (that is the convention on this host):
+#           limit_req_zone $binary_remote_addr zone=wc_search:1m rate=10r/m;
+#     The wallclip search runs a CLIP embedding per request on the backend,
+#     so an unauthenticated hammer must be throttled; anubis only challenges
+#     browser user agents and does not stop this. 10r/m with a small burst
+#     is enough for a human paging through searches.
 
 # the bare path redirects to the listing
 location = /wallpapers {
@@ -46,7 +55,39 @@ location /wallpapers/ {
     sub_filter 'action="/"'         'action="/wallpapers/"';
     sub_filter 'href="/search"'     'href="/wallpapers/search"';
     sub_filter 'href="/"'           'href="/wallpapers/"';
+
+    # the exact search location exists only to carry the rate limit: the
+    # prefix location below it cannot take one, because a plain grid view
+    # fires ~200 image requests and would trip its own limiter. proxy_pass
+    # and the sub_filter chain must be repeated here: an exact location
+    # shadows the prefix one entirely.
+    location = /wallpapers/search {
+        limit_req zone=wc_search burst=5 nodelay;
+        limit_req_status 429;
+
+        # URI "/search", not "/": an exact location matches the whole URI,
+        # so "/" would hand the backend the landing page. With the URI set,
+        # proxy_pass replaces the matched /wallpapers/search with /search —
+        # what the prefix location sends today.
+        proxy_pass http://anubis_wallclip/search;
+        include snippets/proxy_base.conf;
+        proxy_set_header Accept-Encoding "";
+        sub_filter_once off;
+        sub_filter 'href="/files/'  'href="/wallpapers/files/';
+        sub_filter 'src="/files/'   'src="/wallpapers/files/';
+        sub_filter 'href="/style.css"'  'href="/wallpapers/style.css"';
+        sub_filter 'href="/themes.css"' 'href="/wallpapers/themes.css"';
+        sub_filter 'action="/search"'   'action="/wallpapers/search"';
+        sub_filter 'href="/search"'     'href="/wallpapers/search"';
+        sub_filter 'href="/"'           'href="/wallpapers/"';
+    }
 }
+
+# Content-Security-Policy: the backend (nginx.conf.example) sets
+# `default-src 'self'; img-src 'self'; style-src 'self';
+# frame-ancestors 'none'` and it flows through anubis to the client. If
+# anything here ever starts stripping or overriding response headers, the
+# CSP must be re-set in this vhost instead of relying on the backend.
 
 # anubis serves its challenge script and callbacks from the origin root;
 # route them to the same instance (it expects the unprefixed
