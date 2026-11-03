@@ -41,7 +41,9 @@ server {
     }
 
     # landing grid: a directory scan of the gallery root (depth 1), with
-    # every <a href="name"> rewritten into an image of the entry's thumbnail
+    # every <a href="name"> rewritten into a thumbnail img that still sits
+    # inside its link: the link targets /files/ (the original) and opens a
+    # new tab, the autoindex text (name/date/size) is hidden with <span>
     location /_home/ {
         internal;
         alias /mnt/HDD/Wallpapers-Flat/;
@@ -52,14 +54,10 @@ server {
         # drop the autoindex "../" parent row outright (it would otherwise
         # surface as a grid tile); must come before the '<a href="' rule
         sub_filter '<pre><a href="../">../</a>\r\n' '<pre>';
-        # each anchor becomes "--><img ... src=...\">": the leading --> closes
-        # the comment opened before it (the <pre> one for the first entry),
-        # so every img tag sits outside the comments and all of autoindex's
-        # own text (name/date/size) stays hidden inside them
-        sub_filter '<pre>'     '<pre><!--';
-        sub_filter '<a href="' '--><img loading="lazy" src="/files/.thumbnails/';
-        sub_filter '">'        '"><!--';
-        sub_filter '</pre>'    '--></pre>';
+        sub_filter '<a href="' '<a target="_blank" rel="noopener" href="/files/';
+        sub_filter '">'        '"><img loading="lazy" src="/files/.thumbnails/';
+        sub_filter '</a>'      '"></a><span hidden>';
+        sub_filter '\r\n'      '</span>\r\n';
     }
 
     # search results: internal proxy for the socket, which answers
