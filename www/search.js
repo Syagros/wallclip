@@ -57,6 +57,7 @@ function page(grid) {
 "<link rel=\"stylesheet\" href=\"/style.css\">\n" +
 "</head>\n" +
 "<body>\n" +
+"<input type=\"checkbox\" id=\"theme\" hidden>\n" +
 "<header>\n" +
 "  <a class=\"brand\" href=\"/\">wall<b>clip</b></a>\n" +
 "  <form action=\"/search\" method=\"get\">\n" +
@@ -66,6 +67,7 @@ function page(grid) {
 "    </div>\n" +
 "  </form>\n" +
 "  <div class=\"spacer\"></div>\n" +
+"  <label for=\"theme\" title=\"Toggle light/dark\"></label>\n" +
 "</header>\n" +
 "\n" +
 "<main class=\"grid\">\n" + grid + "\n" +

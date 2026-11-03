@@ -1,7 +1,10 @@
 /* Shared stylesheet for the wallclip pages: index.html and the
    njs-rendered /search page both link this file. */
-:root {
-  color-scheme: dark light;
+/* Colour variables live on body (not :root) so the checkbox toggle can
+   override the system preference: unchecked follows the scheme, checked
+   inverts it. The toggle UI is a hidden input + label — no script. */
+body {
+  color-scheme: dark;
   --bg: #0b0b0c;
   --surface: #151517;
   --border: #232326;
@@ -9,10 +12,12 @@
   --muted: #6e6e75;
   --hover: #3a3a40;
   --backdrop: rgba(11, 11, 12, 0.85);
+  --icon: "☀";  /* label shows the mode clicking switches TO */
 }
 /* light scheme when the browser asks for it; dark stays the default */
 @media (prefers-color-scheme: light) {
-  :root {
+  body {
+    color-scheme: light;
     --bg: #f4f4f5;
     --surface: #ffffff;
     --border: #e2e2e6;
@@ -20,6 +25,32 @@
     --muted: #71717a;
     --hover: #d4d4d8;
     --backdrop: rgba(244, 244, 245, 0.85);
+    --icon: "☾";
+  }
+}
+/* checked inverts the system scheme */
+body:has(#theme:checked) {
+  color-scheme: light;
+  --bg: #f4f4f5;
+  --surface: #ffffff;
+  --border: #e2e2e6;
+  --text: #1a1a1c;
+  --muted: #71717a;
+  --hover: #d4d4d8;
+  --backdrop: rgba(244, 244, 245, 0.85);
+  --icon: "☾";
+}
+@media (prefers-color-scheme: light) {
+  body:has(#theme:checked) {
+    color-scheme: dark;
+    --bg: #0b0b0c;
+    --surface: #151517;
+    --border: #232326;
+    --text: #e8e8ea;
+    --muted: #6e6e75;
+    --hover: #3a3a40;
+    --backdrop: rgba(11, 11, 12, 0.85);
+    --icon: "☀";
   }
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -92,6 +123,20 @@ button[type="submit"] {
   transition: border-color .15s;
 }
 button[type="submit"]:hover { border-color: var(--hover); }
+/* the checkbox-driven light/dark toggle (label in the header) */
+label[for="theme"] {
+  padding: 6px 12px;
+  font-size: 15px;
+  line-height: 1.2;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color .15s;
+}
+label[for="theme"]:hover { border-color: var(--hover); }
+label[for="theme"]::before { content: var(--icon); }
 .spacer { width: 60px; }
 
 .grid {
