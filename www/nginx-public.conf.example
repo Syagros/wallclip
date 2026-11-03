@@ -45,3 +45,11 @@ location /wallpapers/ {
     sub_filter 'href="/search"'     'href="/wallpapers/search"';
     sub_filter 'href="/"'           'href="/wallpapers/"';
 }
+
+# anubis serves its challenge script and callbacks from the origin root;
+# route them to the same instance (it expects the unprefixed
+# /.within.website/... paths, matching how the other endpoints pair up)
+location /.within.website/ {
+    proxy_pass http://anubis_wallclip;
+    include snippets/proxy_base.conf;
+}
