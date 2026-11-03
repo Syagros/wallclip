@@ -114,4 +114,3 @@ Notes:
 
 # TODO:
 * Make code portable
-* To implement -d/--delete: Rewrite the read/write logic of socket functions
