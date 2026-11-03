@@ -48,11 +48,17 @@ server {
 
         sub_filter_types *;
         sub_filter_once off;
-        sub_filter '<a href="' '<img loading="lazy" src="/files/.thumbnails/';
-		sub_filter '<pre>'     '<pre><!--';
-		sub_filter '<a href="' '--><img loading="lazy" src="/files/.thumbnails/';
-		sub_filter '">'        '"><!--';
-		sub_filter '</pre>'    '--></pre>';
+        # drop the autoindex "../" parent row outright (it would otherwise
+        # surface as a grid tile); must come before the '<a href="' rule
+        sub_filter '<pre><a href="../">../</a>\r\n' '<pre>';
+        # each anchor becomes "--><img ... src=...\">": the leading --> closes
+        # the comment opened before it (the <pre> one for the first entry),
+        # so every img tag sits outside the comments and all of autoindex's
+        # own text (name/date/size) stays hidden inside them
+        sub_filter '<pre>'     '<pre><!--';
+        sub_filter '<a href="' '--><img loading="lazy" src="/files/.thumbnails/';
+        sub_filter '">'        '"><!--';
+        sub_filter '</pre>'    '--></pre>';
     }
 
     # search results: internal proxy for the socket, which answers
