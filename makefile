@@ -8,15 +8,18 @@ LDFLAGS += -L/usr/local/src/clip.cpp/build -L/usr/local/src/clip.cpp/build/ggml/
 TARGET = wallclip
 SRC = wallclip.c env-loader.c
 
-.PHONY: all debug clean
+.PHONY: all debug install clean
 
-all: clean compile
+all: clean compile install
 
 compile: $(SRC)
 	$(CC) $(CFLAGS) -o $(TARGET) $(SRC) $(LDFLAGS)
 
 debug: $(SRC)
 	$(CC) $(CFLAGS) $(DEBUG_FLAGS) -o $(TARGET) $(SRC) $(LDFLAGS)
+
+install:
+	install -m 0755 $(TARGET) /usr/bin/$(TARGET)
 
 clean:
 	rm -f $(TARGET)
