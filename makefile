@@ -9,7 +9,7 @@ LDFLAGS += -L$(CLIP_DIR)/build -L$(CLIP_DIR)/build/ggml/src -lclip -lggml -lm -l
 
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
-LDFLAGS += -lc++        # macOS ships no libstdc++
+LDFLAGS += -lc++ -framework Accelerate   # no libstdc++ on macOS; ggml calls cblas and vDSP
 else
 LDFLAGS += -lstdc++
 endif
