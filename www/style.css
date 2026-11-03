@@ -1,11 +1,26 @@
 /* Shared stylesheet for the wallclip pages: index.html and the
    njs-rendered /search page both link this file. */
 :root {
+  color-scheme: dark light;
   --bg: #0b0b0c;
   --surface: #151517;
   --border: #232326;
   --text: #e8e8ea;
   --muted: #6e6e75;
+  --hover: #3a3a40;
+  --backdrop: rgba(11, 11, 12, 0.85);
+}
+/* light scheme when the browser asks for it; dark stays the default */
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f4f4f5;
+    --surface: #ffffff;
+    --border: #e2e2e6;
+    --text: #1a1a1c;
+    --muted: #71717a;
+    --hover: #d4d4d8;
+    --backdrop: rgba(244, 244, 245, 0.85);
+  }
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -22,7 +37,7 @@ header {
   align-items: center;
   gap: 16px;
   padding: 12px 16px;
-  background: rgba(11, 11, 12, 0.85);
+  background: var(--backdrop);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--border);
 }
@@ -65,7 +80,7 @@ input[type="search"] {
   transition: border-color .15s;
 }
 input[type="search"]::placeholder { color: var(--muted); }
-input[type="search"]:focus { border-color: #3a3a40; }
+input[type="search"]:focus { border-color: var(--hover); }
 button[type="submit"] {
   padding: 9px 16px;
   background: var(--surface);
@@ -76,7 +91,7 @@ button[type="submit"] {
   cursor: pointer;
   transition: border-color .15s;
 }
-button[type="submit"]:hover { border-color: #3a3a40; }
+button[type="submit"]:hover { border-color: var(--hover); }
 .spacer { width: 60px; }
 
 .grid {
@@ -109,7 +124,7 @@ button[type="submit"]:hover { border-color: #3a3a40; }
   padding: 6px 10px;
   font-size: 12px;
   color: var(--text);
-  background: rgba(11, 11, 12, 0.75);
+  background: var(--backdrop);
   border: 1px solid var(--border);
   border-radius: 6px;
   text-decoration: none;
