@@ -1,4 +1,7 @@
-#define _GNU_SOURCE // explicit_bzero(), getline()
+#define _GNU_SOURCE // getline()
+#ifdef __APPLE__
+#define __STDC_WANT_LIB_EXT1__ 1 // memset_s()
+#endif
 #include "env-loader.h"
 #include "log.h"
 #include <ctype.h>
@@ -17,9 +20,23 @@ static struct env_entry *entries = NULL;
 static size_t n_entries = 0;
 static size_t cap_entries = 0;
 
+// Overwrites `p` with zeroes. explicit_bzero() is missing on macOS, where
+// memset_s() (C11 Annex K) fills in; both cannot be optimised out.
+static void secure_bzero(void *p, size_t n) {
+#ifdef __APPLE__
+	if (memset_s(p, n, 0, n) != 0) {
+		volatile unsigned char *v = p;
+		while (n--)
+			*v++ = 0;
+	}
+#else
+	explicit_bzero(p, n);
+#endif
+}
+
 static void wipe_str(char *s) {
 	if (s)
-		explicit_bzero(s, strlen(s));
+		secure_bzero(s, strlen(s));
 }
 
 // Sets `key` to a copy of `val`, replacing (and wiping) any previous value.
@@ -184,12 +201,12 @@ int env_load_file(const char *path) {
 
 cleanup:
 	if (line) {
-		explicit_bzero(line, cap);
+		secure_bzero(line, cap);
 		free(line);
 	}
 	if (f)
 		fclose(f);
-	explicit_bzero(iobuf, sizeof(iobuf));
+	secure_bzero(iobuf, sizeof(iobuf));
 	return rc;
 }
 
