@@ -8,18 +8,19 @@
 #
 # No njs setup needed.
 
-# ?theme= is only present on a picker submit, so "$is_args$arg_theme"
-# separates it from a plain visit (which starts with a "?" only when there
-# really are arguments): "?" alone means Default was picked, "?<slug>" a
-# theme, anything else no submit at all.
-map $is_args$arg_theme $wc_theme_cookie {
+# The picker submits nothing but ?theme=, so the literal $args strings are
+# exact matches: "theme=" means Default was picked, "theme=<slug>" a theme.
+# A search query (q=...) matches neither and leaves the cookie untouched —
+# keying on "$is_args$arg_theme" instead would see "?" for ANY argument
+# list and clear the cookie on every /search?q= refresh.
+map $args $wc_theme_cookie {
     default              "";
-    "?"                  "wc_theme=; Path=/; Max-Age=0";
-    "?default-light"     "wc_theme=default-light; Path=/; Max-Age=31536000; SameSite=Lax";
-    "?gruvbox"           "wc_theme=gruvbox; Path=/; Max-Age=31536000; SameSite=Lax";
-    "?gruvbox-light"     "wc_theme=gruvbox-light; Path=/; Max-Age=31536000; SameSite=Lax";
-    "?catppuccin"        "wc_theme=catppuccin; Path=/; Max-Age=31536000; SameSite=Lax";
-    "?tokyonight"        "wc_theme=tokyonight; Path=/; Max-Age=31536000; SameSite=Lax";
+    "theme="             "wc_theme=; Path=/; Max-Age=0";
+    "theme=default-light"     "wc_theme=default-light; Path=/; Max-Age=31536000; SameSite=Lax";
+    "theme=gruvbox"           "wc_theme=gruvbox; Path=/; Max-Age=31536000; SameSite=Lax";
+    "theme=gruvbox-light"     "wc_theme=gruvbox-light; Path=/; Max-Age=31536000; SameSite=Lax";
+    "theme=catppuccin"        "wc_theme=catppuccin; Path=/; Max-Age=31536000; SameSite=Lax";
+    "theme=tokyonight"        "wc_theme=tokyonight; Path=/; Max-Age=31536000; SameSite=Lax";
 }
 
 server {
