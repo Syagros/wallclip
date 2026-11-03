@@ -283,20 +283,22 @@ static void test_birthtime(void) {
 	CHECK(file_birthtime(&fake, "/nonexistent/wallclip/test") == 777);
 #endif
 
-	// 3. a real file whose mtime is pushed far into the past: the birth time
-	//    must not follow it
+	// 3. a real file whose mtime is pushed far away from its creation: the
+	//    birth time must not follow it. The mtime goes into the FUTURE on
+	//    purpose: macOS and the BSDs also move the birth time back when the
+	//    mtime is set to something earlier than it.
 	char path[300];
 	path_in_tmp(path, sizeof(path), "bt.dat");
 	time_t before = time(NULL);
 	write_file(path, "x");
 
-	const time_t old_mtime = 1000000000; // 2001-09-09
-	struct timeval tv[2] = {{old_mtime, 0}, {old_mtime, 0}};
+	const time_t far_mtime = before + 100000; // about 27 hours ahead
+	struct timeval tv[2] = {{far_mtime, 0}, {far_mtime, 0}};
 	CHECK(utimes(path, tv) == 0);
 
 	struct stat st;
 	CHECK(stat(path, &st) == 0);
-	CHECK(st.st_mtime == old_mtime);
+	CHECK(st.st_mtime == far_mtime);
 
 	time_t bt = file_birthtime(&st, path);
 	long delta = (long)(bt - before);
@@ -308,7 +310,7 @@ static void test_birthtime(void) {
 		SKIP("this filesystem reports no birth time");
 	} else {
 		CHECK(bt == st.st_birthtime);
-		CHECK(bt != old_mtime);
+		CHECK(bt != far_mtime);
 		CHECK(delta < 120);
 	}
 #else
@@ -319,18 +321,18 @@ static void test_birthtime(void) {
 	if (statx(AT_FDCWD, path, 0, STATX_BTIME, &stx) == 0 &&
 			(stx.stx_mask & STATX_BTIME)) {
 		CHECK(bt == stx.stx_btime.tv_sec);
-		CHECK(bt != old_mtime);
+		CHECK(bt != far_mtime);
 		CHECK(delta < 120);
 	} else {
 		SKIP("this filesystem reports no btime (mtime fallback used)");
-		CHECK(bt == old_mtime);
+		CHECK(bt == far_mtime);
 	}
 #endif
 
 	// 4. a path that vanished: still returns a sane value
 	unlink(path);
 #if !BSD_LIKE
-	CHECK(file_birthtime(&st, path) == old_mtime); // statx fails -> mtime
+	CHECK(file_birthtime(&st, path) == far_mtime); // statx fails -> mtime
 #endif
 }
 
