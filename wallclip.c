@@ -978,8 +978,11 @@ cleanup:
  * added under a different path spelling (e.g. via a symlink). Files are
  * touched only after a successful commit: a failed delete must leave the
  * database pointing at intact files, while orphaned files are recoverable by
- * running the delete again. A file that is already gone is not an error.
- * Returns 0 on success (row deleted), 1 if not in the database, -1 on error.
+ * running the delete again. A file that is already gone and matches no row
+ * is a no-op (success); an existing file that matches no row still reports
+ * failure, and so does an unlink() failure other than ENOENT.
+ * Returns 0 on success (row deleted or file already gone), 1 if an existing
+ * file is not in the database, -1 on error.
  */
 static int delete_item(PGconn *conn, const char *arg) {
 	int rc = -1;
@@ -1037,8 +1040,11 @@ static int delete_item(PGconn *conn, const char *arg) {
 	}
 
 	if (!found) {
-		Errorf(E_FAIL, "'%s': not in database", arg);
-		rc = 1;
+		if (path)
+			Errorf(E_FAIL, "'%s': not in database", arg);
+		else
+			Errorf(E_HINT, "'%s': file gone and not in database", arg);
+		rc = path ? 1 : 0;
 		goto cleanup;
 	}
 
