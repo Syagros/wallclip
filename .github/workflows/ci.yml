@@ -45,7 +45,7 @@ jobs:
         run: |
           git clone --recurse-submodules https://github.com/monatis/clip.cpp $HOME/clip.cpp
           cd $HOME/clip.cpp && mkdir build && cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release && make -j$(sysctl -n hw.ncpu)
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 && make -j$(sysctl -n hw.ncpu)
       - name: wallclip
         run: |
           O=$(brew --prefix openssl@3); P=$(brew --prefix libpq); M=$(brew --prefix libmagic)
