@@ -31,7 +31,7 @@ server {
 	root /home/oc/Projects/wallclip/www;
 
 	add_header Content-Security-Policy
-		"default-src 'self'; img-src 'self'; style-src 'self'; frame-ancestors 'none'";
+		"default-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 	server_tokens off;
 
 	ssi on;
