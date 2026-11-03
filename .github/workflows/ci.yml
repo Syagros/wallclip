@@ -43,7 +43,7 @@ jobs:
         run: brew install pkg-config cmake imagemagick libmagic openssl@3 libpq
       - name: clip.cpp
         run: |
-          git clone --recurse-submodules https://github.com/monatis/clip.cpp $HOME/clip.cpp
+          git clone --recurse-submodules https://github.com/Syagros/clip.cpp $HOME/clip.cpp
           cd $HOME/clip.cpp && mkdir build && cd build
           cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 && make -j$(sysctl -n hw.ncpu)
       - name: wallclip
