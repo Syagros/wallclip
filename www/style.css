@@ -137,8 +137,8 @@ label[for="theme"] {
 }
 label[for="theme"]:hover { border-color: var(--hover); }
 label[for="theme"]::before { content: var(--icon); }
-/* theme dropdown: a <details> popover; the radios inside are what
-   themes.css keys off via body:has(#tp-<name>:checked) */
+/* theme dropdown: a <details> popover; each item is a submit button that
+   GETs ?theme=<slug> and nginx's map turns that into the cookie */
 details.theme { position: relative; }
 details.theme summary {
   display: block;
@@ -172,39 +172,24 @@ details.theme .theme-list {
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
 }
-/* the radios stay in the form for submission but are never shown */
-details.theme .theme-list input[type="radio"] {
-  position: absolute;
-  opacity: 0;
-  pointer-events: none;
-}
-details.theme .theme-list label {
+details.theme .theme-list button {
   padding: 6px 10px;
   border-radius: 6px;
   font-size: 0.875rem;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text);
   cursor: pointer;
   user-select: none;
 }
-details.theme .theme-list label:hover { background: var(--hover); }
-details.theme .theme-list button {
-  margin-top: 4px;
-  padding: 6px 10px;
-  font-size: 0.75rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text);
-  cursor: pointer;
-  transition: border-color .15s;
+details.theme .theme-list button:hover { background: var(--hover); }
+details.theme .theme-list button:focus-visible {
+  outline: 1px solid var(--hover);
+  outline-offset: -1px;
 }
-details.theme .theme-list button:hover { border-color: var(--hover); }
-/* mark the picked theme inside the menu (the server renders checked) */
-body:not([data-theme]) label[for="tp-default"],
-body[data-theme="gruvbox"] label[for="tp-gruvbox"],
-body[data-theme="catppuccin"] label[for="tp-catppuccin"],
-body[data-theme="tokyonight"] label[for="tp-tokyonight"],
-body[data-theme="dracula"] label[for="tp-dracula"],
-body[data-theme="nord"] label[for="tp-nord"] {
+/* mark the picked theme inside the menu (the server renders aria-current) */
+details.theme .theme-list button[aria-current="true"] {
   background: var(--hover);
 }
 .spacer { width: 60px; }

@@ -7,18 +7,19 @@
 <link rel="stylesheet" href="/style.css">
 <link rel="stylesheet" href="/themes.css">
 </head>
-<!--# set var="wc_t" value="" -->
+<!--# set var="wc_t" value="" --><!--# set var="wc_def" value="1" -->
 <!-- cookie first, then ?theme= wins (SSI has no else/nested if) -->
-<!--# if expr="$cookie_wc_theme = gruvbox" --><!--# set var="wc_t" value="gruvbox" --><!--# endif -->
-<!--# if expr="$cookie_wc_theme = catppuccin" --><!--# set var="wc_t" value="catppuccin" --><!--# endif -->
-<!--# if expr="$cookie_wc_theme = tokyonight" --><!--# set var="wc_t" value="tokyonight" --><!--# endif -->
-<!--# if expr="$cookie_wc_theme = dracula" --><!--# set var="wc_t" value="dracula" --><!--# endif -->
-<!--# if expr="$cookie_wc_theme = nord" --><!--# set var="wc_t" value="nord" --><!--# endif -->
-<!--# if expr="$arg_theme = gruvbox" --><!--# set var="wc_t" value="gruvbox" --><!--# endif -->
-<!--# if expr="$arg_theme = catppuccin" --><!--# set var="wc_t" value="catppuccin" --><!--# endif -->
-<!--# if expr="$arg_theme = tokyonight" --><!--# set var="wc_t" value="tokyonight" --><!--# endif -->
-<!--# if expr="$arg_theme = dracula" --><!--# set var="wc_t" value="dracula" --><!--# endif -->
-<!--# if expr="$arg_theme = nord" --><!--# set var="wc_t" value="nord" --><!--# endif -->
+<!--# if expr="$cookie_wc_theme = gruvbox" --><!--# set var="wc_t" value="gruvbox" --><!--# set var="wc_def" value="" --><!--# endif -->
+<!--# if expr="$cookie_wc_theme = catppuccin" --><!--# set var="wc_t" value="catppuccin" --><!--# set var="wc_def" value="" --><!--# endif -->
+<!--# if expr="$cookie_wc_theme = tokyonight" --><!--# set var="wc_t" value="tokyonight" --><!--# set var="wc_def" value="" --><!--# endif -->
+<!--# if expr="$cookie_wc_theme = dracula" --><!--# set var="wc_t" value="dracula" --><!--# set var="wc_def" value="" --><!--# endif -->
+<!--# if expr="$cookie_wc_theme = nord" --><!--# set var="wc_t" value="nord" --><!--# set var="wc_def" value="" --><!--# endif -->
+<!--# if expr="$args = theme=" --><!--# set var="wc_t" value="" --><!--# set var="wc_def" value="1" --><!--# endif --><!-- cookie arg overrides cookie only when it names a theme -->
+<!--# if expr="$arg_theme = gruvbox" --><!--# set var="wc_t" value="gruvbox" --><!--# set var="wc_def" value="" --><!--# endif -->
+<!--# if expr="$arg_theme = catppuccin" --><!--# set var="wc_t" value="catppuccin" --><!--# set var="wc_def" value="" --><!--# endif -->
+<!--# if expr="$arg_theme = tokyonight" --><!--# set var="wc_t" value="tokyonight" --><!--# set var="wc_def" value="" --><!--# endif -->
+<!--# if expr="$arg_theme = dracula" --><!--# set var="wc_t" value="dracula" --><!--# set var="wc_def" value="" --><!--# endif -->
+<!--# if expr="$arg_theme = nord" --><!--# set var="wc_t" value="nord" --><!--# set var="wc_def" value="" --><!--# endif -->
 <body class="search"<!--# if expr="$wc_t" --> data-theme="<!--# echo var="wc_t" -->"<!--# endif -->>
 <input type="checkbox" id="theme" hidden>
 <header>
@@ -34,19 +35,12 @@
   <details class="theme">
     <summary title="Colour theme" aria-label="Colour theme">Theme</summary>
     <form class="theme-list" method="get" action="/search">
-      <input type="radio" hidden name="theme" id="tp-default" value=""<!--# if expr="$wc_t = ''" --> checked<!--# endif -->>
-      <label for="tp-default">Default</label>
-      <input type="radio" hidden name="theme" id="tp-gruvbox" value="gruvbox"<!--# if expr="$wc_t = gruvbox" --> checked<!--# endif -->>
-      <label for="tp-gruvbox">Gruvbox</label>
-      <input type="radio" hidden name="theme" id="tp-catppuccin" value="catppuccin"<!--# if expr="$wc_t = catppuccin" --> checked<!--# endif -->>
-      <label for="tp-catppuccin">Catppuccin</label>
-      <input type="radio" hidden name="theme" id="tp-tokyonight" value="tokyonight"<!--# if expr="$wc_t = tokyonight" --> checked<!--# endif -->>
-      <label for="tp-tokyonight">Tokyo Night</label>
-      <input type="radio" hidden name="theme" id="tp-dracula" value="dracula"<!--# if expr="$wc_t = dracula" --> checked<!--# endif -->>
-      <label for="tp-dracula">Dracula</label>
-      <input type="radio" hidden name="theme" id="tp-nord" value="nord"<!--# if expr="$wc_t = nord" --> checked<!--# endif -->>
-      <label for="tp-nord">Nord</label>
-      <button type="submit">Apply</button>
+      <button type="submit" name="theme" value=""<!--# if expr="$wc_def" --> aria-current="true"<!--# endif -->>Default</button>
+      <button type="submit" name="theme" value="gruvbox"<!--# if expr="$wc_t = gruvbox" --> aria-current="true"<!--# endif -->>Gruvbox</button>
+      <button type="submit" name="theme" value="catppuccin"<!--# if expr="$wc_t = catppuccin" --> aria-current="true"<!--# endif -->>Catppuccin</button>
+      <button type="submit" name="theme" value="tokyonight"<!--# if expr="$wc_t = tokyonight" --> aria-current="true"<!--# endif -->>Tokyo Night</button>
+      <button type="submit" name="theme" value="dracula"<!--# if expr="$wc_t = dracula" --> aria-current="true"<!--# endif -->>Dracula</button>
+      <button type="submit" name="theme" value="nord"<!--# if expr="$wc_t = nord" --> aria-current="true"<!--# endif -->>Nord</button>
     </form>
   </details>
 </header>
