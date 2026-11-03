@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <errno.h>
+#include <string.h>
 
 #define C_TEXT_ "\033[37m"
 #define C_OKAY_ "\033[34m"
@@ -11,7 +12,7 @@
 #define C_CLEAR "\033[0m"
 static char* __ErrStr__[] = {
 	"%s "C_TEXT_"%s %s"C_TEXT_"from : "C_WARN_"%s"C_OKAY_" @ "C_HINT_"%s"C_CLEAR":"C_WARN_"%d"C_CLEAR"\n",
-	"("C_HINT_"%d"C_TEXT_":"C_WARN_"%m"C_TEXT_") ",
+	"("C_HINT_"%d"C_TEXT_":"C_WARN_"%s"C_TEXT_") ",
 	C_OKAY_ "[  OK  ]" C_CLEAR,
 	C_HINT_ "[ HINT ]" C_CLEAR,
 	C_WARN_ "[ WARN ]" C_CLEAR,
@@ -66,7 +67,9 @@ Errnof_impl(const char * const type, const char * const func, const char * const
     vsnprintf(msg, sizeof(msg), fmt, ap);
     va_end(ap);
 
-    snprintf(eno, sizeof(eno), __ErrStr__[1], errno, errno);
+    // %m is a glibc extension, so use strerror() to work on macOS/BSD too
+    int saved_errno = errno;
+    snprintf(eno, sizeof(eno), __ErrStr__[1], saved_errno, strerror(saved_errno));
     fprintf(stderr, __ErrStr__[0], type, msg, eno, func, file, line);
 }
 
