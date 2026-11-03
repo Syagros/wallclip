@@ -81,4 +81,8 @@ server {
 		access_log off;  # one grid view fires ~200 image requests
 			expires 1d;
 	}
+	
+	location / {
+		return 404;
+	}
 }
