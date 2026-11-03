@@ -230,7 +230,9 @@ int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn,
 		goto cleanup;
 	}
 
-	// the text encoder's buffers only fit CLIP_MAX_TOKENS, truncate like CLIP does
+	// clip.cpp's text encoder reads at most CLIP_MAX_TOKENS tokens and needs
+	// the end token last; this surgery depends on clip_tokenize() emitting
+	// the token ids with the end token at the tail
 	if (tokens.size > CLIP_MAX_TOKENS) {
 		tokens.data[CLIP_MAX_TOKENS - 1] = tokens.data[tokens.size - 1]; // end token
 		tokens.size = CLIP_MAX_TOKENS;
