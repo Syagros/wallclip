@@ -62,10 +62,15 @@ struct option long_options[] = {
 };
 
 static volatile sig_atomic_t stop_requested;
+static int stop_pipe[2] = { -1, -1 }; // self-pipe: poll() can't see a flag, but it sees a byte
 
 static void on_stop_signal(int sig) {
 	(void)sig;
+	int saved_errno = errno; // the interrupted code may be about to check it
 	stop_requested = 1;
+	ssize_t ignored = write(stop_pipe[1], &(char){1}, 1); // wakes poll(); must stay async-signal-safe
+	(void)ignored;
+	errno = saved_errno;
 }
 
 static void usage(FILE *out) {
@@ -1515,8 +1520,20 @@ int main(int argc, char *argv[]) {
 			goto cleanup;
 		}
 
-		// SIGINT/SIGTERM are only delivered while waiting in ppoll(), so a
-		// request in flight always finishes and the check below can't race
+		// the self-pipe makes a stop race-free without ppoll's sigmask
+		// (missing on macOS): the handler writes a byte whenever the signal
+		// lands, so poll() always wakes and a request in flight always
+		// finishes before the flag check below ends the loop
+		if (pipe(stop_pipe) < 0) {
+			Errnof(E_CRIT, "pipe() failed");
+			goto cleanup;
+		}
+		int pfl = fcntl(stop_pipe[1], F_GETFL);
+		if (pfl < 0 || fcntl(stop_pipe[1], F_SETFL, pfl | O_NONBLOCK) < 0) {
+			Errnof(E_CRIT, "fcntl() failed");
+			goto cleanup;
+		}
+
 		struct sigaction sa;
 		memset(&sa, 0, sizeof sa);
 		sa.sa_handler = on_stop_signal;
@@ -1524,18 +1541,22 @@ int main(int argc, char *argv[]) {
 		sigaction(SIGINT, &sa, NULL);
 		sigaction(SIGTERM, &sa, NULL);
 
-		sigset_t blocked, waiting;
-		sigemptyset(&blocked);
-		sigaddset(&blocked, SIGINT);
-		sigaddset(&blocked, SIGTERM);
-		sigprocmask(SIG_BLOCK, &blocked, &waiting);
-
 		while (!stop_requested) {
-			struct pollfd pfd = { .fd = fd, .events = POLLIN };
-			if (ppoll(&pfd, 1, NULL, &waiting) < 0) {
+			struct pollfd pfd[2] = {
+				{ .fd = fd, .events = POLLIN },
+				{ .fd = stop_pipe[0], .events = POLLIN },
+			};
+			if (poll(pfd, 2, -1) < 0) {
 				if (errno == EINTR)
 					continue;
-				Errnof(E_CRIT, "ppoll() failed");
+				Errnof(E_CRIT, "poll() failed");
+				break;
+			}
+			if (pfd[1].revents & POLLIN) {
+				// drain the byte; the flag is what we act on
+				char buf[64];
+				ssize_t r = read(stop_pipe[0], buf, sizeof buf);
+				(void)r;
 				break;
 			}
 
@@ -1558,6 +1579,8 @@ int main(int argc, char *argv[]) {
 			handle_client(client_fd, clip_ctx, conn);
 		}
 
+		close(stop_pipe[0]);
+		close(stop_pipe[1]);
 		close(fd);
 		unlink(sockp);
 		rc = stop_requested ? EXIT_SUCCESS : EXIT_FAILURE; // else it hit an error
