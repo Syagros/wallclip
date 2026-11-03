@@ -812,6 +812,39 @@ cleanup:
 	return thumbnail;
 }
 
+/*
+ * Rejects file names the web layer cannot render safely. The search results
+ * are spliced raw into HTML attributes (href="..." and src="...") by nginx's
+ * sub_filter, so a quote or an angle bracket could break out of the
+ * attribute, and a control character would corrupt the socket protocol
+ * itself: the reply is newline-separated lines with the full-res and
+ * thumbnail paths separated by a tab. iscntrl() covers tab/newline/CR and
+ * friends; the rest are the characters HTML quoting would have to escape.
+ * 0 if the name is safe, -1 otherwise (error already reported).
+ */
+static int check_filename(const char *path) {
+	char *path_copy = strdup(path);
+	if (!path_copy) {
+		Errnof(E_FAIL, "strdup failed validating file name");
+		return -1;
+	}
+	const char *name = basename(path_copy);
+	int rc = 0;
+	for (const unsigned char *p = (const unsigned char *)name; *p; p++) {
+		if (iscntrl(*p) || *p == '"' || *p == '\'' || *p == '<' ||
+				*p == '>' || *p == '&') {
+			Errorf(E_FAIL,
+					"'%s': file name contains a character the web page "
+					"cannot render safely; rename the file and retry",
+					path);
+			rc = -1;
+			break;
+		}
+	}
+	free(path_copy);
+	return rc;
+}
+
 // Returns a malloc'd title built from the file's basename with its
 // extension stripped (caller frees), or NULL on error.
 static char *build_title(const char *path) {
@@ -1085,6 +1118,10 @@ int process_img(struct image_ctx *img) {
 	char *title = NULL;
 	char *slug = NULL;
 	int ins = INSERT_ERROR;
+
+	// reject before any expensive work: no thumbnail, no embedding, no row
+	if (check_filename(img->entry->path) != 0)
+		goto cleanup;
 
 	if (compute_checksum_and_mime(img->entry->path, img->entry->fsize, md,
 				&md_len, &mime_type) != 0)
