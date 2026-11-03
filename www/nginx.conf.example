@@ -1,139 +1,84 @@
-# nginx config example for the wallclip web page (backend).
-# No JavaScript anywhere: both pages are static HTML processed by nginx SSI.
-# The landing grid is nginx's own directory scan of the gallery (autoindex),
-# the search results come from the wallclip unix socket, and sub_filter
-# rebuilds both as bare <img loading="lazy"> tags laid out by CSS grid.
-# The theme picker works without client-side JavaScript: ?theme= (via a
-# map) sets a wc_theme cookie, and SSI echoes it into <body data-theme>.
-#
-# This is a loopback backend: anubis (anubis.wallclip) fronts it and the
-# public vhost proxies https://voidx0.com/wallpapers/ to that anubis
-# instance, rewriting the absolute paths into /wallpapers/... on the way
-# out (see nginx-public.conf.example). No njs setup needed.
-#
-# Directives below outside the server block (the map, the cache path) sit
-# in the http context: sites-enabled files are included from nginx.conf's
-# http block. sudo mkdir -p /var/cache/nginx/wallclip before first use.
+# sudo mkdir -p /var/cache/nginx/wallclip before first use
 proxy_cache_path /var/cache/nginx/wallclip levels=1:2 keys_zone=wc_q:1m
-                 inactive=10m max_size=64m;
+inactive=10m max_size=64m;
 
-# The picker submits nothing but ?theme=, so the literal $args strings are
-# exact matches: "theme=" means Default was picked, "theme=<slug>" a theme.
-# A search query (q=...) matches neither and leaves the cookie untouched —
-# keying on "$is_args$arg_theme" instead would see "?" for ANY argument
-# list and clear the cookie on every /search?q= refresh.
+# Exact-match on $args: only a bare ?theme=... touches the cookie, so
+# /search?q= refreshes leave it alone.
 map $args $wc_theme_cookie {
-    default              "";
-    "theme="             "wc_theme=; Path=/; Max-Age=0";
-    "theme=default-light"     "wc_theme=default-light; Path=/; Max-Age=31536000; SameSite=Lax";
-    "theme=gruvbox"           "wc_theme=gruvbox; Path=/; Max-Age=31536000; SameSite=Lax";
-    "theme=gruvbox-light"     "wc_theme=gruvbox-light; Path=/; Max-Age=31536000; SameSite=Lax";
-    "theme=catppuccin"        "wc_theme=catppuccin; Path=/; Max-Age=31536000; SameSite=Lax";
-    "theme=tokyonight"        "wc_theme=tokyonight; Path=/; Max-Age=31536000; SameSite=Lax";
+	default                   "";
+	"theme="                  "wc_theme=; Path=/; Max-Age=0";
+	"theme=default-light"     "wc_theme=default-light; Path=/; Max-Age=31536000; SameSite=Lax";
+	"theme=gruvbox"           "wc_theme=gruvbox; Path=/; Max-Age=31536000; SameSite=Lax";
+	"theme=gruvbox-light"     "wc_theme=gruvbox-light; Path=/; Max-Age=31536000; SameSite=Lax";
+	"theme=catppuccin"        "wc_theme=catppuccin; Path=/; Max-Age=31536000; SameSite=Lax";
+	"theme=tokyonight"        "wc_theme=tokyonight; Path=/; Max-Age=31536000; SameSite=Lax";
 }
 
 server {
-    listen 127.0.0.1:8080;
+	listen 127.0.0.1:8080;
 
-    root /home/oc/Projects/wallclip/www;
+	root /home/oc/Projects/wallclip/www;
 
-    # no JavaScript anywhere, so a source-allowlist CSP is free to set;
-    # must be mirrored in the public vhost (response headers pass through
-    # anubis unchanged, but the public layer should not rely on that).
-    add_header Content-Security-Policy
-        "default-src 'self'; img-src 'self'; style-src 'self'; frame-ancestors 'none'";
-    server_tokens off;
+	add_header Content-Security-Policy
+		"default-src 'self'; img-src 'self'; style-src 'self'; frame-ancestors 'none'";
+	server_tokens off;
 
-    ssi on;
-    add_header Set-Cookie $wc_theme_cookie; # empty map value: no header
+	ssi on;
+	add_header Set-Cookie $wc_theme_cookie;  # empty value: no header
 
-    location = / {
-        try_files /index.html =404;
-    }
+		location = / {
+			try_files /index.html =404;
+		}
 
-    location = /search {
-        try_files /search.html =404;
-    }
+	location = /search {
+		try_files /search.html =404;
+	}
 
-    # stylesheets change with each page deploy; cache them briefly
-    location ~ ^/(style|themes)\.css$ {
-        expires 1h;
-    }
+	location ~ ^/(style|themes)\.css$ {
+		expires 1h;
+	}
 
-    # landing grid: a directory scan of the gallery root (depth 1), with
-    # every <a href="name"> rewritten into a thumbnail img that still sits
-    # inside its link: the link targets /files/ (the original) and opens a
-    # new tab, the autoindex text (name/date/size) is hidden with <span>
-    location /_home/ {
-        internal;
-        alias /mnt/HDD/Wallpapers-Flat/;
-        autoindex on;
+# Landing grid: autoindex rewritten into thumbnail imgs inside links to originals
+	location /_home/ {
+		internal;
+		alias /mnt/HDD/Wallpapers-Flat/;
+		autoindex on;
 
-        sub_filter_types *;
-        sub_filter_once off;
-        # drop the autoindex "../" parent row outright (it would otherwise
-        # surface as a grid tile); must come before the '<a href="' rule
-        sub_filter '<pre><a href="../">../</a>\r\n' '<pre>';
-        sub_filter '<a href="' '<a target="_blank" rel="noopener" href="/files/';
-        sub_filter '">'        '"><img loading="lazy" src="/files/.thumbnails/';
-        sub_filter '</a>'      '"></a><span hidden>';
-        sub_filter '\r\n'      '</span>\r\n';
-        # known gap: autoindex HTML-escapes the name inside href="..." but
-        # does not URL-encode it, so the spliced src="..." carries raw
-        # spaces (and href keeps them too). sub_filter cannot percent-encode,
-        # so this stays; browsers resolve spaces in URLs fine, and quote
-        # safety comes from the HTML escaping. Do not add filenames with
-        # quotes anyway: wallclip's add rejects them at the source.
-    }
+		sub_filter_types *;
+		sub_filter_once off;
+# must precede the '<a href="' rule: drops the "../" row
+		sub_filter '<pre><a href="../">../</a>\r\n' '<pre>';
+		sub_filter '<a href="' '<a target="_blank" rel="noopener" href="/files/';
+		sub_filter '">'        '"><img loading="lazy" src="/files/.thumbnails/';
+		sub_filter '</a>'      '"></a><span hidden>';
+		sub_filter '\r\n'      '</span>\r\n';
+# known gap: filenames are not URL-encoded (raw spaces in href/src)
+	}
 
-    # search results: internal proxy for the socket, which answers
-    # GET /<query> with newline-separated absolute thumbnail paths
-    # ("/mnt/HDD/Wallpapers-Flat/.thumbnails/name"). sub_filter turns the
-    # list into one HTML fragment of <img> tags: every "\n<root>" becomes
-    # the end of one img tag plus the start of the next, the first line's
-    # root is rewritten by itself. The page wraps the fragment in one more
-    # <img ... src=" pair.
-    location /_q/ {
-        internal;
-        rewrite ^/_q/(.*)$ /$1 break;
-        proxy_pass http://unix:/run/wallclip/socket:/;
-        proxy_set_header Accept-Encoding "";
+# Search: socket returns "<full-res>\t<thumb>" per line, turned into <a><img> tags
+	location /_q/ {
+		internal;
+		rewrite ^/_q/(.*)$ /$1 break;
+		proxy_pass http://unix:/run/wallclip/socket:/;
+		proxy_set_header Accept-Encoding "";
 
-        # the daemon runs a CLIP embedding per query, so identical searches
-        # are answered from cache instead of re-burning CPU. Keyed on the
-        # subrequest URI (/_q/<query>): $arg_q is empty inside an SSI
-        # include subrequest, and keying on it made every search share one
-        # cache entry. Only 200s are cached — errors are recomputed, and an
-        # empty result is cached under its own key, so "No results" renders
-        # for that query alone.
-        proxy_cache wc_q;
-        proxy_cache_key "$uri";
-        proxy_cache_valid 200 10m;
+# Key on $uri: $arg_q is empty in SSI subrequests
+		proxy_cache wc_q;
+		proxy_cache_key "$uri";
+		proxy_cache_valid 200 10m;
 
-        sub_filter_types *;
-        sub_filter_once off;
-        # the socket (HTTP mode) answers "<full-res>\t<thumbnail>" per line:
-        # the page needs the filename twice (link href + img src) and
-        # sub_filter cannot duplicate text, so each line carries both paths
-        # tab -> close the href, open the img (a literal tab: nginx does
-        # not parse \t escapes in quoted strings, only \n)
-        sub_filter '	/mnt/HDD/Wallpapers-Flat/' '"><img loading="lazy" src="/files/';
-        # newline -> close the link, open the next one
-        sub_filter '\n/mnt/HDD/Wallpapers-Flat/' '"></a><a target="_blank" rel="noopener" href="/files/';
-        # the first line's full-res path is rewritten by itself
-        sub_filter '/mnt/HDD/Wallpapers-Flat/' '/files/';
-        # known quirk: nginx's sub module flushes the final bytes of a
-        # proxied body without substituting, so the last line's trailing
-        # newline stays inside the last src="..." attribute. Browsers strip
-        # ASCII whitespace when resolving the URL, so the image loads.
-    }
+		sub_filter_types *;
+		sub_filter_once off;
+# literal tab (nginx does not parse \t)
+		sub_filter '	/mnt/HDD/Wallpapers-Flat/' '"><img loading="lazy" src="/files/';
+		sub_filter '\n/mnt/HDD/Wallpapers-Flat/' '"></a><a target="_blank" rel="noopener" href="/files/';
+		sub_filter '/mnt/HDD/Wallpapers-Flat/' '/files/';
+# known quirk: last line's trailing newline stays in src; browsers strip it
+	}
 
-    # serves both thumbnails (.../.thumbnails/name) and originals;
-    # body URLs point into /files/, which is rooted at the gallery root.
-    # access_log off: one grid view fires ~200 image requests.
-    location /files/ {
-        alias /mnt/HDD/Wallpapers-Flat/;
-        access_log off;
-        expires 1d;
-    }
+	location /files/ {
+		alias /mnt/HDD/Wallpapers-Flat/;
+		access_log off;  # one grid view fires ~200 image requests
+			expires 1d;
+	}
 }
