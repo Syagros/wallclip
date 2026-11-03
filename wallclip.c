@@ -1349,6 +1349,23 @@ static int load_config(int cli_verbosity) {
 	return 0;
 }
 
+// Birth time of `path` with per-OS support and an mtime fallback for
+// filesystems without one.
+static time_t file_birthtime(const struct stat *st, const char *path) {
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || \
+		defined(__OpenBSD__) || defined(__DragonFly__)
+	if (st->st_birthtime > 0)
+		return st->st_birthtime;
+#else
+	struct statx stx;
+	if (statx(AT_FDCWD, path, 0, STATX_BTIME, &stx) == 0 &&
+			(stx.stx_mask & STATX_BTIME)) {
+		return stx.stx_btime.tv_sec;
+	}
+#endif
+	return st->st_mtime;
+}
+
 int main(int argc, char *argv[]) {
 	int rc = EXIT_FAILURE; // the exit code, fatal errors keep it
 	bool is_server = false;
@@ -1485,14 +1502,7 @@ int main(int argc, char *argv[]) {
 		e->fsize = st.st_size;
 		e->modified_at = st.st_mtime;
 
-		struct statx stx;
-		if (statx(AT_FDCWD, path, 0, STATX_BTIME, &stx) == 0 &&
-				(stx.stx_mask & STATX_BTIME)) {
-			e->created_at = stx.stx_btime.tv_sec;
-		} else {
-			e->created_at = e->modified_at; /* fallback for filesystems
-											   without birth time */
-		}
+		e->created_at = file_birthtime(&st, path);
 		nvalid++;
 	}
 
