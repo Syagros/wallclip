@@ -1,0 +1,105 @@
+{
+  "id": "gruvbox-light-medium",
+  "theme": "gruvbox",
+  "variant": "light-medium",
+  "mode": "light",
+  "source": {
+    "repo": "morhetz/gruvbox",
+    "url": "https://github.com/morhetz/gruvbox",
+    "commit": "ef8864bb42bf244f0295d1c5a403b27e3d139695",
+    "file": "colors/gruvbox.vim",
+    "license": "MIT/X11 (per upstream README)",
+    "retrieved": "2026-11-03"
+  },
+  "roles": {
+    "bg": "#fbf1c7",
+    "bg_alt": "#ebdbb2",
+    "surface": "#d5c4a1",
+    "border": "#bdae93",
+    "fg": "#3c3836",
+    "fg_muted": "#7c6f64",
+    "red": "#9d0006",
+    "orange": "#af3a03",
+    "yellow": "#b57614",
+    "green": "#79740e",
+    "cyan": "#427b58",
+    "blue": "#076678",
+    "purple": "#8f3f71",
+    "pink": "#8f3f71",
+    "accent": "#af3a03"
+  },
+  "role_sources": {
+    "bg": "bg0",
+    "bg_alt": "bg1",
+    "surface": "bg2",
+    "border": "bg3",
+    "fg": "fg1",
+    "fg_muted": "fg4",
+    "red": "red",
+    "orange": "orange",
+    "yellow": "yellow",
+    "green": "green",
+    "cyan": "aqua",
+    "blue": "blue",
+    "purple": "purple",
+    "pink": "purple",
+    "accent": "orange"
+  },
+  "role_fallbacks": {
+    "pink": "gruvbox has no pink; reuses purple"
+  },
+  "native": {
+    "bg0": "#fbf1c7",
+    "bg1": "#ebdbb2",
+    "bg2": "#d5c4a1",
+    "bg3": "#bdae93",
+    "bg4": "#a89984",
+    "fg0": "#282828",
+    "fg1": "#3c3836",
+    "fg2": "#504945",
+    "fg3": "#665c54",
+    "fg4": "#7c6f64",
+    "gray": "#928374",
+    "red": "#9d0006",
+    "green": "#79740e",
+    "yellow": "#b57614",
+    "blue": "#076678",
+    "purple": "#8f3f71",
+    "aqua": "#427b58",
+    "orange": "#af3a03"
+  },
+  "gruvbox_accent_set": "faded",
+  "all_accent_sets": {
+    "bright": {
+      "red": "#fb4934",
+      "green": "#b8bb26",
+      "yellow": "#fabd2f",
+      "blue": "#83a598",
+      "purple": "#d3869b",
+      "aqua": "#8ec07c",
+      "orange": "#fe8019"
+    },
+    "neutral": {
+      "red": "#cc241d",
+      "green": "#98971a",
+      "yellow": "#d79921",
+      "blue": "#458588",
+      "purple": "#b16286",
+      "aqua": "#689d6a",
+      "orange": "#d65d0e"
+    },
+    "faded": {
+      "red": "#9d0006",
+      "green": "#79740e",
+      "yellow": "#b57614",
+      "blue": "#076678",
+      "purple": "#8f3f71",
+      "aqua": "#427b58",
+      "orange": "#af3a03"
+    }
+  },
+  "notes": [
+    "Resolved exactly as gruvbox.vim does for background=light, contrast=medium.",
+    "Dark mode uses bright_* accents; light mode uses faded_* accents (upstream behaviour)."
+  ]
+}

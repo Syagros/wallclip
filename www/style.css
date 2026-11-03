@@ -1,5 +1,5 @@
-/* Shared stylesheet for the wallclip pages: index.html and the
-   njs-rendered /search page both link this file. */
+/* Shared stylesheet for the wallclip pages: index.html and search.html
+   both link this file. */
 /* Colour variables live on body (not :root) so the checkbox toggle can
    override the system preference: unchecked follows the scheme, checked
    inverts it. The toggle UI is a hidden input + label — no script. */
@@ -12,7 +12,7 @@ body {
   --muted: #6e6e75;
   --hover: #3a3a40;
   --backdrop: rgba(11, 11, 12, 0.85);
-  --icon: "☀";  /* label shows the mode clicking switches TO */
+  --icon: "\u2600";  /* label shows the mode clicking switches TO */
 }
 /* light scheme when the browser asks for it; dark stays the default */
 @media (prefers-color-scheme: light) {
@@ -25,7 +25,7 @@ body {
     --muted: #71717a;
     --hover: #d4d4d8;
     --backdrop: rgba(244, 244, 245, 0.85);
-    --icon: "☾";
+    --icon: "\u263e";
   }
 }
 /* checked inverts the system scheme */
@@ -38,7 +38,7 @@ body:has(#theme:checked) {
   --muted: #71717a;
   --hover: #d4d4d8;
   --backdrop: rgba(244, 244, 245, 0.85);
-  --icon: "☾";
+  --icon: "\u263e";
 }
 @media (prefers-color-scheme: light) {
   body:has(#theme:checked) {
@@ -50,7 +50,7 @@ body:has(#theme:checked) {
     --muted: #6e6e75;
     --hover: #3a3a40;
     --backdrop: rgba(11, 11, 12, 0.85);
-    --icon: "☀";
+    --icon: "\u2600";
   }
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -73,7 +73,7 @@ header {
   border-bottom: 1px solid var(--border);
 }
 .brand {
-  font-size: 0.8125rem;
+  font-size: 1.625rem;
   font-weight: 600;
   letter-spacing: 0.04em;
   color: var(--muted);
@@ -137,13 +137,153 @@ label[for="theme"] {
 }
 label[for="theme"]:hover { border-color: var(--hover); }
 label[for="theme"]::before { content: var(--icon); }
+/* theme dropdown: a <details> popover; the radios inside are what
+   themes.css keys off via body:has(#tp-<name>:checked) */
+details.theme { position: relative; }
+details.theme summary {
+  display: block;
+  min-width: 96px;
+  padding: 6px 14px;
+  text-align: center;
+  font-size: 0.875rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  transition: border-color .15s;
+}
+details.theme summary::-webkit-details-marker { display: none; }
+details.theme summary::before { content: var(--icon); margin-right: 6px; }
+details.theme summary:hover { border-color: var(--hover); }
+details.theme .theme-list {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 20;
+  min-width: 140px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+/* the radios stay in the form for submission but are never shown */
+details.theme .theme-list input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+details.theme .theme-list label {
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  cursor: pointer;
+  user-select: none;
+}
+details.theme .theme-list label:hover { background: var(--hover); }
+details.theme .theme-list button {
+  margin-top: 4px;
+  padding: 6px 10px;
+  font-size: 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color .15s;
+}
+details.theme .theme-list button:hover { border-color: var(--hover); }
+/* mark the picked theme inside the menu (the server renders checked) */
+body:not([data-theme]) label[for="tp-default"],
+body[data-theme="gruvbox"] label[for="tp-gruvbox"],
+body[data-theme="catppuccin"] label[for="tp-catppuccin"],
+body[data-theme="tokyonight"] label[for="tp-tokyonight"],
+body[data-theme="dracula"] label[for="tp-dracula"],
+body[data-theme="nord"] label[for="tp-nord"] {
+  background: var(--hover);
+}
 .spacer { width: 60px; }
 
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-  gap: 2px;
-  padding: 2px;
+  gap: 8px;
+  padding: 8px;
+}
+/* The grids are raw lists now: the landing is nginx's autoindex output (a
+   full html document with a table) and the search grid is a bare img list.
+   Unfold the table so the images become direct grid items, hide everything
+   that is not an image, and size the bare images like the old cards. */
+/* The grids are raw lists now. The search page is a bare img list — grid
+   works there. The landing is nginx's autoindex output: a <pre> whose
+   entries are <img> tags each followed by a contentful text node (name,
+   date, size). A text node always becomes its own grid item — that was the
+   checkerboard — so on the landing the grid is replaced by inline flow,
+   where font-size: 0 text takes no space at all. */
+body.home main.grid { display: block; }
+main.grid { font-size: 0; }
+main.grid h1, main.grid hr { display: none; }
+main.grid .empty { font-size: 0.875rem; }
+body.home main.grid pre {
+  display: block;
+  white-space: normal;
+  font-family: inherit;
+  overflow: hidden; /* contain the floats' margins */
+}
+body.home main.grid pre img,
+body.search main.grid img {
+  display: block;
+  object-fit: cover;
+  animation: fade .4s ease both;
+  transition: transform .3s;
+}
+/* the old .card box, now on the img itself */
+body.search main.grid img {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+}
+body.home main.grid pre img {
+  float: left;
+  width: calc(20% - 8px);
+  aspect-ratio: 16 / 10;
+  margin: 4px;
+}
+@media (max-width: 1280px) {
+  body.home main.grid pre img { width: calc(25% - 8px); }
+}
+@media (max-width: 1000px) {
+  body.home main.grid pre img { width: calc(33.333% - 8px); }
+}
+@media (max-width: 660px) {
+  body.home main.grid pre img { width: calc(50% - 8px); }
+}
+main.grid img:hover { transform: scale(1.03); }
+/* zero results: the socket returns an empty body, the img src stays empty */
+main.grid img[src=""], main.grid img[src$="/"] { display: none; }
+/* empty-state markers, scoped per page: on the search page an empty socket
+   body leaves img[src=""]; on the landing an empty gallery leaves only the
+   autoindex parent entry, whose src ends in "/" (every real entry has a
+   src that names a file). */
+body.search main.grid:has(img[src=""])::after {
+  content: "No results";
+  grid-column: 1 / -1;
+  text-align: center;
+  font-size: 0.875rem;
+  color: var(--muted);
+  padding: 80px 0;
+}
+body.home main.grid:not(:has(img:not([src$="/"])))::after {
+  content: "Gallery is empty";
+  grid-column: 1 / -1;
+  text-align: center;
+  font-size: 0.875rem;
+  color: var(--muted);
+  padding: 80px 0;
 }
 .card {
   position: relative;

@@ -1,50 +1,85 @@
 # nginx config example for the wallclip web page.
-# The page is at / (the grid is an njs-rendered SSI include that scans the
-# gallery directory), /search renders results with nginx JavaScript (njs),
-# and the image root (including .thumbnails) is served at /files/ so the
-# page can build image URLs from the absolute paths the server returns.
+# No JavaScript anywhere: both pages are static HTML processed by nginx SSI.
+# The landing grid is nginx's own directory scan of the gallery (autoindex),
+# the search results come from the wallclip unix socket, and sub_filter
+# rebuilds both as bare <img loading="lazy"> tags laid out by CSS grid.
+# The theme picker works without client-side JavaScript: ?theme= (via a
+# map) sets a wc_theme cookie, and SSI echoes it into <body data-theme>.
 #
-# njs setup outside this server block (http {} context of nginx.conf):
-#     js_path "/home/oc/Projects/wallclip/www/";
-#     js_import search from search.js;
+# No njs setup needed.
+
+# ?theme= is only present on a picker submit, so "$is_args$arg_theme"
+# separates it from a plain visit (which starts with a "?" only when there
+# really are arguments): "?" alone means Default was picked, "?<slug>" a
+# theme, anything else no submit at all.
+map $is_args$arg_theme $wc_theme_cookie {
+    default         "";
+    "?"             "wc_theme=; Path=/; Max-Age=0";
+    "?gruvbox"      "wc_theme=gruvbox; Path=/; Max-Age=31536000; SameSite=Lax";
+    "?catppuccin"   "wc_theme=catppuccin; Path=/; Max-Age=31536000; SameSite=Lax";
+    "?tokyonight"   "wc_theme=tokyonight; Path=/; Max-Age=31536000; SameSite=Lax";
+    "?dracula"      "wc_theme=dracula; Path=/; Max-Age=31536000; SameSite=Lax";
+    "?nord"         "wc_theme=nord; Path=/; Max-Age=31536000; SameSite=Lax";
+}
 
 server {
     listen 127.0.0.1:8080;
     # listen 443 ssl;  # add tls + server_name for a real host
 
     root /home/oc/Projects/wallclip/www;
-    index index.html;
 
-    # index.html pulls its card grid from the njs handler below via SSI
     ssi on;
+    add_header Set-Cookie $wc_theme_cookie; # empty map value: no header
 
     location = / {
         try_files /index.html =404;
     }
 
-    # landing grid: njs scans the gallery directory and renders every card;
-    # the images carry loading="lazy", so no per-batch fetching is needed
-    # (internal: only the SSI include on the index page reaches it)
-    location = /_home {
-        internal;
-        js_content search.home;
-    }
-
-    # search page: njs queries the wallclip socket and renders the cards
     location = /search {
-        js_content search.render;
+        try_files /search.html =404;
     }
 
-    # internal: forwards the search term to the wallclip unix socket.
-    # "GET /_q/red%20sunset" reaches the socket as "GET /red sunset".
+    # landing grid: a directory scan of the gallery root (depth 1), with
+    # every <a href="name"> rewritten into an image of the entry's thumbnail
+    location /_home/ {
+        internal;
+        alias /mnt/HDD/Wallpapers-Flat/;
+        autoindex on;
+
+        sub_filter_types *;
+        sub_filter_once off;
+        sub_filter '<a href="' '<img loading="lazy" src="/files/.thumbnails/';
+		sub_filter '<pre>'     '<pre><!--';
+		sub_filter '<a href="' '--><img loading="lazy" src="/files/.thumbnails/';
+		sub_filter '">'        '"><!--';
+		sub_filter '</pre>'    '--></pre>';
+    }
+
+    # search results: internal proxy for the socket, which answers
+    # GET /<query> with newline-separated absolute thumbnail paths
+    # ("/mnt/HDD/Wallpapers-Flat/.thumbnails/name"). sub_filter turns the
+    # list into one HTML fragment of <img> tags: every "\n<root>" becomes
+    # the end of one img tag plus the start of the next, the first line's
+    # root is rewritten by itself, and the trailing newline is dropped. The
+    # page wraps the fragment in one more <img ... src=" pair.
     location /_q/ {
         internal;
+        rewrite ^/_q/(.*)$ /$1 break;
         proxy_pass http://unix:/run/wallclip/socket:/;
-        proxy_set_header Connection close;
+        proxy_set_header Accept-Encoding "";
+
+        sub_filter_types *;
+        sub_filter_once off;
+        sub_filter '\n/mnt/HDD/Wallpapers-Flat/' '"><img loading="lazy" src="/files/';
+        sub_filter '/mnt/HDD/Wallpapers-Flat/' '/files/';
+        # known quirk: nginx's sub module flushes the final bytes of a
+        # proxied body without substituting, so the last line's trailing
+        # newline stays inside the last src="..." attribute. Browsers strip
+        # ASCII whitespace when resolving the URL, so the image loads.
     }
 
-    # serves both thumbnails (.../.thumbnails/name) and originals (for download);
-    # the njs module strips the gallery root from the paths the socket returns
+    # serves both thumbnails (.../.thumbnails/name) and originals;
+    # body URLs point into /files/, which is rooted at the gallery root
     location /files/ {
         alias /mnt/HDD/Wallpapers-Flat/;
         # adjust to wherever the gallery's images live

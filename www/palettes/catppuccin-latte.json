@@ -1,0 +1,113 @@
+{
+  "id": "catppuccin-latte",
+  "theme": "catppuccin",
+  "variant": "latte",
+  "mode": "light",
+  "source": {
+    "repo": "catppuccin/palette",
+    "url": "https://github.com/catppuccin/palette",
+    "commit": "07d02aa110ef9eb7e7427afca5c73ba9cf7f8ebd",
+    "file": "palette.json",
+    "license": "MIT",
+    "retrieved": "2026-11-03"
+  },
+  "roles": {
+    "bg": "#eff1f5",
+    "bg_alt": "#e6e9ef",
+    "surface": "#ccd0da",
+    "border": "#bcc0cc",
+    "fg": "#4c4f69",
+    "fg_muted": "#6c6f85",
+    "red": "#d20f39",
+    "orange": "#fe640b",
+    "yellow": "#df8e1d",
+    "green": "#40a02b",
+    "cyan": "#179299",
+    "blue": "#1e66f5",
+    "purple": "#8839ef",
+    "pink": "#ea76cb",
+    "accent": "#8839ef"
+  },
+  "role_sources": {
+    "bg": "base",
+    "bg_alt": "mantle",
+    "surface": "surface0",
+    "border": "surface1",
+    "fg": "text",
+    "fg_muted": "subtext0",
+    "red": "red",
+    "orange": "peach",
+    "yellow": "yellow",
+    "green": "green",
+    "cyan": "teal",
+    "blue": "blue",
+    "purple": "mauve",
+    "pink": "pink",
+    "accent": "mauve"
+  },
+  "role_fallbacks": {},
+  "native": {
+    "rosewater": "#dc8a78",
+    "flamingo": "#dd7878",
+    "pink": "#ea76cb",
+    "mauve": "#8839ef",
+    "red": "#d20f39",
+    "maroon": "#e64553",
+    "peach": "#fe640b",
+    "yellow": "#df8e1d",
+    "green": "#40a02b",
+    "teal": "#179299",
+    "sky": "#04a5e5",
+    "sapphire": "#209fb5",
+    "blue": "#1e66f5",
+    "lavender": "#7287fd",
+    "text": "#4c4f69",
+    "subtext1": "#5c5f77",
+    "subtext0": "#6c6f85",
+    "overlay2": "#7c7f93",
+    "overlay1": "#8c8fa1",
+    "overlay0": "#9ca0b0",
+    "surface2": "#acb0be",
+    "surface1": "#bcc0cc",
+    "surface0": "#ccd0da",
+    "base": "#eff1f5",
+    "mantle": "#e6e9ef",
+    "crust": "#dce0e8"
+  },
+  "display_name": "Latte",
+  "palette_version": "1.8.0",
+  "ansi": {
+    "black": {
+      "normal": "#5c5f77",
+      "bright": "#6c6f85"
+    },
+    "red": {
+      "normal": "#d20f39",
+      "bright": "#de293e"
+    },
+    "green": {
+      "normal": "#40a02b",
+      "bright": "#49af3d"
+    },
+    "yellow": {
+      "normal": "#df8e1d",
+      "bright": "#eea02d"
+    },
+    "blue": {
+      "normal": "#1e66f5",
+      "bright": "#456eff"
+    },
+    "magenta": {
+      "normal": "#ea76cb",
+      "bright": "#fe85d8"
+    },
+    "cyan": {
+      "normal": "#179299",
+      "bright": "#2d9fa8"
+    },
+    "white": {
+      "normal": "#acb0be",
+      "bright": "#bcc0cc"
+    }
+  }
+}

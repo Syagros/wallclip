@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wallclip</title>
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/themes.css">
+</head>
+<!--# set var="wc_t" value="" -->
+<!-- cookie first, then ?theme= wins (SSI has no else/nested if) -->
+<!--# if expr="$cookie_wc_theme = gruvbox" --><!--# set var="wc_t" value="gruvbox" --><!--# endif -->
+<!--# if expr="$cookie_wc_theme = catppuccin" --><!--# set var="wc_t" value="catppuccin" --><!--# endif -->
+<!--# if expr="$cookie_wc_theme = tokyonight" --><!--# set var="wc_t" value="tokyonight" --><!--# endif -->
+<!--# if expr="$cookie_wc_theme = dracula" --><!--# set var="wc_t" value="dracula" --><!--# endif -->
+<!--# if expr="$cookie_wc_theme = nord" --><!--# set var="wc_t" value="nord" --><!--# endif -->
+<!--# if expr="$arg_theme = gruvbox" --><!--# set var="wc_t" value="gruvbox" --><!--# endif -->
+<!--# if expr="$arg_theme = catppuccin" --><!--# set var="wc_t" value="catppuccin" --><!--# endif -->
+<!--# if expr="$arg_theme = tokyonight" --><!--# set var="wc_t" value="tokyonight" --><!--# endif -->
+<!--# if expr="$arg_theme = dracula" --><!--# set var="wc_t" value="dracula" --><!--# endif -->
+<!--# if expr="$arg_theme = nord" --><!--# set var="wc_t" value="nord" --><!--# endif -->
+<body class="search"<!--# if expr="$wc_t" --> data-theme="<!--# echo var="wc_t" -->"<!--# endif -->>
+<input type="checkbox" id="theme" hidden>
+<header>
+  <a class="brand" href="/">wall<b>clip</b></a>
+  <form action="/search" method="get">
+    <div class="searchbar">
+      <input type="search" name="q" placeholder="Search images…" aria-label="Search">
+      <button type="submit">Search</button>
+    </div>
+  </form>
+  <div class="spacer"></div>
+  <label for="theme" title="Toggle light/dark"></label>
+  <details class="theme">
+    <summary title="Colour theme" aria-label="Colour theme">Theme</summary>
+    <form class="theme-list" method="get" action="/search">
+      <input type="radio" hidden name="theme" id="tp-default" value=""<!--# if expr="$wc_t = ''" --> checked<!--# endif -->>
+      <label for="tp-default">Default</label>
+      <input type="radio" hidden name="theme" id="tp-gruvbox" value="gruvbox"<!--# if expr="$wc_t = gruvbox" --> checked<!--# endif -->>
+      <label for="tp-gruvbox">Gruvbox</label>
+      <input type="radio" hidden name="theme" id="tp-catppuccin" value="catppuccin"<!--# if expr="$wc_t = catppuccin" --> checked<!--# endif -->>
+      <label for="tp-catppuccin">Catppuccin</label>
+      <input type="radio" hidden name="theme" id="tp-tokyonight" value="tokyonight"<!--# if expr="$wc_t = tokyonight" --> checked<!--# endif -->>
+      <label for="tp-tokyonight">Tokyo Night</label>
+      <input type="radio" hidden name="theme" id="tp-dracula" value="dracula"<!--# if expr="$wc_t = dracula" --> checked<!--# endif -->>
+      <label for="tp-dracula">Dracula</label>
+      <input type="radio" hidden name="theme" id="tp-nord" value="nord"<!--# if expr="$wc_t = nord" --> checked<!--# endif -->>
+      <label for="tp-nord">Nord</label>
+      <button type="submit">Apply</button>
+    </form>
+  </details>
+</header>
+
+<main class="grid">
+<!--# if expr="$arg_q" --><img loading="lazy" src="<!--# include virtual="/_q/$arg_q" -->"><!--# endif -->
+<div class="empty"<!--# if expr="$arg_q" --> hidden<!--# endif -->>Type something to search</div>
+</main>
+</body>
+</html>
