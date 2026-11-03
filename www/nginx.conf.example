@@ -24,7 +24,9 @@ server {
 
     # landing grid: njs scans the gallery directory and renders every card;
     # the images carry loading="lazy", so no per-batch fetching is needed
+    # (internal: only the SSI include on the index page reaches it)
     location = /_home {
+        internal;
         js_content search.home;
     }
 
