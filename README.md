@@ -111,6 +111,3 @@ Notes:
 * An `embed_dim` that doesn't match the model makes Postgres reject inserts and queries.
 * pgvector's HNSW index supports at most 2000 dimensions.
 * To run the old and new servers side by side, give the new one its own `WALLCLIP_SOCKET_PATH`.
-
-# TODO:
-* Make code portable
