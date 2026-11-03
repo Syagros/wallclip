@@ -1,0 +1,50 @@
+# nginx config example for the wallclip web page.
+# The page is at / (the grid is an njs-rendered SSI include that scans the
+# gallery directory), /search renders results with nginx JavaScript (njs),
+# and the image root (including .thumbnails) is served at /files/ so the
+# page can build image URLs from the absolute paths the server returns.
+#
+# njs setup outside this server block (http {} context of nginx.conf):
+#     js_path "/home/oc/Projects/wallclip/www/";
+#     js_import search from search.js;
+
+server {
+    listen 127.0.0.1:8080;
+    # listen 443 ssl;  # add tls + server_name for a real host
+
+    root /home/oc/Projects/wallclip/www;
+    index index.html;
+
+    # index.html pulls its card grid from the njs handler below via SSI
+    ssi on;
+
+    location = / {
+        try_files /index.html =404;
+    }
+
+    # landing grid: njs scans the gallery directory and renders every card;
+    # the images carry loading="lazy", so no per-batch fetching is needed
+    location = /_home {
+        js_content search.home;
+    }
+
+    # search page: njs queries the wallclip socket and renders the cards
+    location = /search {
+        js_content search.render;
+    }
+
+    # internal: forwards the search term to the wallclip unix socket.
+    # "GET /_q/red%20sunset" reaches the socket as "GET /red sunset".
+    location /_q/ {
+        internal;
+        proxy_pass http://unix:/run/wallclip/socket:/;
+        proxy_set_header Connection close;
+    }
+
+    # serves both thumbnails (.../.thumbnails/name) and originals (for download);
+    # the njs module strips the gallery root from the paths the socket returns
+    location /files/ {
+        alias /mnt/HDD/Wallpapers-Flat/;
+        # adjust to wherever the gallery's images live
+    }
+}
