@@ -8,20 +8,21 @@
 <link rel="stylesheet" href="/themes.css">
 </head>
 <!--# set var="wc_t" value="" --><!--# set var="wc_def" value="1" -->
-<!-- cookie first, then ?theme= wins (SSI has no else/nested if) -->
+<!-- cookie first, then ?theme= wins (SSI has no else/nested if;
+   bare "theme=" means Default and must beat the cookie too) -->
+<!--# if expr="$cookie_wc_theme = default-light" --><!--# set var="wc_t" value="default-light" --><!--# set var="wc_def" value="" --><!--# endif -->
 <!--# if expr="$cookie_wc_theme = gruvbox" --><!--# set var="wc_t" value="gruvbox" --><!--# set var="wc_def" value="" --><!--# endif -->
+<!--# if expr="$cookie_wc_theme = gruvbox-light" --><!--# set var="wc_t" value="gruvbox-light" --><!--# set var="wc_def" value="" --><!--# endif -->
 <!--# if expr="$cookie_wc_theme = catppuccin" --><!--# set var="wc_t" value="catppuccin" --><!--# set var="wc_def" value="" --><!--# endif -->
 <!--# if expr="$cookie_wc_theme = tokyonight" --><!--# set var="wc_t" value="tokyonight" --><!--# set var="wc_def" value="" --><!--# endif -->
-<!--# if expr="$cookie_wc_theme = dracula" --><!--# set var="wc_t" value="dracula" --><!--# set var="wc_def" value="" --><!--# endif -->
-<!--# if expr="$cookie_wc_theme = nord" --><!--# set var="wc_t" value="nord" --><!--# set var="wc_def" value="" --><!--# endif -->
-<!--# if expr="$args = theme=" --><!--# set var="wc_t" value="" --><!--# set var="wc_def" value="1" --><!--# endif --><!-- cookie arg overrides cookie only when it names a theme -->
+<!--# if expr="$args = theme=" --><!--# set var="wc_t" value="" --><!--# set var="wc_def" value="1" --><!--# endif -->
+<!-- bare "theme=" means Default and must beat the cookie too -->
+<!--# if expr="$arg_theme = default-light" --><!--# set var="wc_t" value="default-light" --><!--# set var="wc_def" value="" --><!--# endif -->
 <!--# if expr="$arg_theme = gruvbox" --><!--# set var="wc_t" value="gruvbox" --><!--# set var="wc_def" value="" --><!--# endif -->
+<!--# if expr="$arg_theme = gruvbox-light" --><!--# set var="wc_t" value="gruvbox-light" --><!--# set var="wc_def" value="" --><!--# endif -->
 <!--# if expr="$arg_theme = catppuccin" --><!--# set var="wc_t" value="catppuccin" --><!--# set var="wc_def" value="" --><!--# endif -->
 <!--# if expr="$arg_theme = tokyonight" --><!--# set var="wc_t" value="tokyonight" --><!--# set var="wc_def" value="" --><!--# endif -->
-<!--# if expr="$arg_theme = dracula" --><!--# set var="wc_t" value="dracula" --><!--# set var="wc_def" value="" --><!--# endif -->
-<!--# if expr="$arg_theme = nord" --><!--# set var="wc_t" value="nord" --><!--# set var="wc_def" value="" --><!--# endif -->
 <body class="home"<!--# if expr="$wc_t" --> data-theme="<!--# echo var="wc_t" -->"<!--# endif -->>
-<input type="checkbox" id="theme" hidden>
 <header>
   <a class="brand" href="/">wall<b>clip</b></a>
   <form action="/search" method="get">
@@ -31,16 +32,15 @@
     </div>
   </form>
   <div class="spacer"></div>
-  <label for="theme" title="Toggle light/dark"></label>
   <details class="theme">
     <summary title="Colour theme" aria-label="Colour theme">Theme</summary>
     <form class="theme-list" method="get" action="/">
       <button type="submit" name="theme" value=""<!--# if expr="$wc_def" --> aria-current="true"<!--# endif -->>Default</button>
+      <button type="submit" name="theme" value="default-light"<!--# if expr="$wc_t = default-light" --> aria-current="true"<!--# endif -->>Default Light</button>
       <button type="submit" name="theme" value="gruvbox"<!--# if expr="$wc_t = gruvbox" --> aria-current="true"<!--# endif -->>Gruvbox</button>
+      <button type="submit" name="theme" value="gruvbox-light"<!--# if expr="$wc_t = gruvbox-light" --> aria-current="true"<!--# endif -->>Gruvbox Light</button>
       <button type="submit" name="theme" value="catppuccin"<!--# if expr="$wc_t = catppuccin" --> aria-current="true"<!--# endif -->>Catppuccin</button>
       <button type="submit" name="theme" value="tokyonight"<!--# if expr="$wc_t = tokyonight" --> aria-current="true"<!--# endif -->>Tokyo Night</button>
-      <button type="submit" name="theme" value="dracula"<!--# if expr="$wc_t = dracula" --> aria-current="true"<!--# endif -->>Dracula</button>
-      <button type="submit" name="theme" value="nord"<!--# if expr="$wc_t = nord" --> aria-current="true"<!--# endif -->>Nord</button>
     </form>
   </details>
 </header>

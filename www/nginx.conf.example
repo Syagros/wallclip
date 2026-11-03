@@ -13,13 +13,13 @@
 # really are arguments): "?" alone means Default was picked, "?<slug>" a
 # theme, anything else no submit at all.
 map $is_args$arg_theme $wc_theme_cookie {
-    default         "";
-    "?"             "wc_theme=; Path=/; Max-Age=0";
-    "?gruvbox"      "wc_theme=gruvbox; Path=/; Max-Age=31536000; SameSite=Lax";
-    "?catppuccin"   "wc_theme=catppuccin; Path=/; Max-Age=31536000; SameSite=Lax";
-    "?tokyonight"   "wc_theme=tokyonight; Path=/; Max-Age=31536000; SameSite=Lax";
-    "?dracula"      "wc_theme=dracula; Path=/; Max-Age=31536000; SameSite=Lax";
-    "?nord"         "wc_theme=nord; Path=/; Max-Age=31536000; SameSite=Lax";
+    default              "";
+    "?"                  "wc_theme=; Path=/; Max-Age=0";
+    "?default-light"     "wc_theme=default-light; Path=/; Max-Age=31536000; SameSite=Lax";
+    "?gruvbox"           "wc_theme=gruvbox; Path=/; Max-Age=31536000; SameSite=Lax";
+    "?gruvbox-light"     "wc_theme=gruvbox-light; Path=/; Max-Age=31536000; SameSite=Lax";
+    "?catppuccin"        "wc_theme=catppuccin; Path=/; Max-Age=31536000; SameSite=Lax";
+    "?tokyonight"        "wc_theme=tokyonight; Path=/; Max-Age=31536000; SameSite=Lax";
 }
 
 server {

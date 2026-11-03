@@ -1,8 +1,9 @@
 /* Shared stylesheet for the wallclip pages: index.html and search.html
    both link this file. */
-/* Colour variables live on body (not :root) so the checkbox toggle can
-   override the system preference: unchecked follows the scheme, checked
-   inverts it. The toggle UI is a hidden input + label — no script. */
+/* Colour variables live on body (not :root) so the theme slugs can
+   override them via body[data-theme=...] (themes.css). Every variant
+   pins its own scheme; there is no runtime toggle. The base palette
+   below is "default" (dark); "default-light" overrides it. */
 body {
   color-scheme: dark;
   --bg: #0b0b0c;
@@ -12,24 +13,8 @@ body {
   --muted: #6e6e75;
   --hover: #3a3a40;
   --backdrop: rgba(11, 11, 12, 0.85);
-  --icon: "\u2600";  /* label shows the mode clicking switches TO */
 }
-/* light scheme when the browser asks for it; dark stays the default */
-@media (prefers-color-scheme: light) {
-  body {
-    color-scheme: light;
-    --bg: #f4f4f5;
-    --surface: #ffffff;
-    --border: #e2e2e6;
-    --text: #1a1a1c;
-    --muted: #71717a;
-    --hover: #d4d4d8;
-    --backdrop: rgba(244, 244, 245, 0.85);
-    --icon: "\u263e";
-  }
-}
-/* checked inverts the system scheme */
-body:has(#theme:checked) {
+body[data-theme="default-light"] {
   color-scheme: light;
   --bg: #f4f4f5;
   --surface: #ffffff;
@@ -38,20 +23,6 @@ body:has(#theme:checked) {
   --muted: #71717a;
   --hover: #d4d4d8;
   --backdrop: rgba(244, 244, 245, 0.85);
-  --icon: "\u263e";
-}
-@media (prefers-color-scheme: light) {
-  body:has(#theme:checked) {
-    color-scheme: dark;
-    --bg: #0b0b0c;
-    --surface: #151517;
-    --border: #232326;
-    --text: #e8e8ea;
-    --muted: #6e6e75;
-    --hover: #3a3a40;
-    --backdrop: rgba(11, 11, 12, 0.85);
-    --icon: "\u2600";
-  }
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -123,20 +94,6 @@ button[type="submit"] {
   transition: border-color .15s;
 }
 button[type="submit"]:hover { border-color: var(--hover); }
-/* the checkbox-driven light/dark toggle (label in the header) */
-label[for="theme"] {
-  padding: 6px 12px;
-  font-size: 0.9375rem;
-  line-height: 1.2;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  cursor: pointer;
-  user-select: none;
-  transition: border-color .15s;
-}
-label[for="theme"]:hover { border-color: var(--hover); }
-label[for="theme"]::before { content: var(--icon); }
 /* theme dropdown: a <details> popover; each item is a submit button that
    GETs ?theme=<slug> and nginx's map turns that into the cookie */
 details.theme { position: relative; }
@@ -156,16 +113,16 @@ details.theme summary {
   transition: border-color .15s;
 }
 details.theme summary::-webkit-details-marker { display: none; }
-details.theme summary::before { content: var(--icon); margin-right: 6px; }
 details.theme summary:hover { border-color: var(--hover); }
 details.theme .theme-list {
   position: absolute;
   right: 0;
   top: calc(100% + 6px);
   z-index: 20;
-  min-width: 140px;
-  display: flex;
-  flex-direction: column;
+  min-width: 260px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
   padding: 4px;
   background: var(--surface);
   border: 1px solid var(--border);
