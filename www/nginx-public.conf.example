@@ -1,0 +1,47 @@
+# nginx config example for the wallclip public endpoint.
+#
+# The backend (nginx.conf.example) serves plain root-absolute URLs on
+# 127.0.0.1:8080. The public vhost proxies it behind anubis under
+# https://voidx0.com/wallpapers/ and rewrites the absolute paths into
+# /wallpapers/... on the way out. That rewrite happens here, at the
+# outermost layer, because the backend has already expanded its SSI
+# includes by the time the response leaves: the finished HTML contains
+# the /files/... img tags and this is the only layer that sees them.
+#
+# Anubis wiring (one instance per service, like the other endpoints):
+#   - /etc/init.d/anubis.wallclip -> symlink to the templated anubis unit
+#   - /etc/conf.d/anubis.wallclip:
+#       ANUBIS_TARGET="http://127.0.0.1:8080"
+#       ANUBIS_DIFFICULTY=4
+#       ANUBIS_OPTS="-policy-fname /etc/anubis/botPolicies.yaml
+#                    -cookie-domain voidx0.com -cookie-expiration-time 15m
+#                    -serve-robots-txt=true
+#                    -ed25519-private-key-hex <per-instance key>"
+#   - /etc/nginx/upstreams/anubis.conf:
+#       upstream anubis_wallclip {
+#           server unix:/run/anubis_wallclip/anubis.sock;
+#           keepalive 2;
+#       }
+
+# the bare path redirects to the listing
+location = /wallpapers {
+    return 301 /wallpapers/;
+}
+
+location /wallpapers/ {
+    proxy_pass http://anubis_wallclip/;
+    include snippets/proxy_base.conf;
+    # sub_filter needs uncompressed bodies; the backend honours this too
+    proxy_set_header Accept-Encoding "";
+
+    sub_filter_once off;
+    # grid + search results: images of the gallery
+    sub_filter 'href="/files/'  'href="/wallpapers/files/';
+    sub_filter 'src="/files/'   'src="/wallpapers/files/';
+    # page chrome: stylesheet links, the search form, the brand link
+    sub_filter 'href="/style.css"'  'href="/wallpapers/style.css"';
+    sub_filter 'href="/themes.css"' 'href="/wallpapers/themes.css"';
+    sub_filter 'action="/search"'   'action="/wallpapers/search"';
+    sub_filter 'href="/search"'     'href="/wallpapers/search"';
+    sub_filter 'href="/"'           'href="/wallpapers/"';
+}

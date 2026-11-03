@@ -1,4 +1,4 @@
-# nginx config example for the wallclip web page.
+# nginx config example for the wallclip web page (backend).
 # No JavaScript anywhere: both pages are static HTML processed by nginx SSI.
 # The landing grid is nginx's own directory scan of the gallery (autoindex),
 # the search results come from the wallclip unix socket, and sub_filter
@@ -6,7 +6,10 @@
 # The theme picker works without client-side JavaScript: ?theme= (via a
 # map) sets a wc_theme cookie, and SSI echoes it into <body data-theme>.
 #
-# No njs setup needed.
+# This is a loopback backend: anubis (anubis.wallclip) fronts it and the
+# public vhost proxies https://voidx0.com/wallpapers/ to that anubis
+# instance, rewriting the absolute paths into /wallpapers/... on the way
+# out (see nginx-public.conf.example). No njs setup needed.
 
 # The picker submits nothing but ?theme=, so the literal $args strings are
 # exact matches: "theme=" means Default was picked, "theme=<slug>" a theme.
@@ -25,7 +28,6 @@ map $args $wc_theme_cookie {
 
 server {
     listen 127.0.0.1:8080;
-    # listen 443 ssl;  # add tls + server_name for a real host
 
     root /home/oc/Projects/wallclip/www;
 
@@ -38,6 +40,11 @@ server {
 
     location = /search {
         try_files /search.html =404;
+    }
+
+    # stylesheets change with each page deploy; cache them briefly
+    location ~ ^/(style|themes)\.css$ {
+        expires 1h;
     }
 
     # landing grid: a directory scan of the gallery root (depth 1), with
@@ -65,8 +72,8 @@ server {
     # ("/mnt/HDD/Wallpapers-Flat/.thumbnails/name"). sub_filter turns the
     # list into one HTML fragment of <img> tags: every "\n<root>" becomes
     # the end of one img tag plus the start of the next, the first line's
-    # root is rewritten by itself, and the trailing newline is dropped. The
-    # page wraps the fragment in one more <img ... src=" pair.
+    # root is rewritten by itself. The page wraps the fragment in one more
+    # <img ... src=" pair.
     location /_q/ {
         internal;
         rewrite ^/_q/(.*)$ /$1 break;
@@ -84,9 +91,11 @@ server {
     }
 
     # serves both thumbnails (.../.thumbnails/name) and originals;
-    # body URLs point into /files/, which is rooted at the gallery root
+    # body URLs point into /files/, which is rooted at the gallery root.
+    # access_log off: one grid view fires ~200 image requests.
     location /files/ {
         alias /mnt/HDD/Wallpapers-Flat/;
-        # adjust to wherever the gallery's images live
+        access_log off;
+        expires 1d;
     }
 }
