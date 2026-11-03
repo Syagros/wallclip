@@ -7,12 +7,12 @@ inactive=10m max_size=64m;
 # /search?q= refreshes leave it alone.
 map $args $wc_theme_cookie {
 	default                   "";
-	"theme="                  "wc_theme=; Path=/; Max-Age=0";
-	"theme=default-light"     "wc_theme=default-light; Path=/; Max-Age=31536000; SameSite=Lax";
-	"theme=gruvbox"           "wc_theme=gruvbox; Path=/; Max-Age=31536000; SameSite=Lax";
-	"theme=gruvbox-light"     "wc_theme=gruvbox-light; Path=/; Max-Age=31536000; SameSite=Lax";
-	"theme=catppuccin"        "wc_theme=catppuccin; Path=/; Max-Age=31536000; SameSite=Lax";
-	"theme=tokyonight"        "wc_theme=tokyonight; Path=/; Max-Age=31536000; SameSite=Lax";
+	"theme="                  "wc_theme=; Path=/; Max-Age=0; Secure";
+	"theme=default-light"     "wc_theme=default-light; Path=/; Max-Age=31536000; SameSite=Lax; Secure";
+	"theme=gruvbox"           "wc_theme=gruvbox; Path=/; Max-Age=31536000; SameSite=Lax; Secure";
+	"theme=gruvbox-light"     "wc_theme=gruvbox-light; Path=/; Max-Age=31536000; SameSite=Lax; Secure";
+	"theme=catppuccin"        "wc_theme=catppuccin; Path=/; Max-Age=31536000; SameSite=Lax; Secure";
+	"theme=tokyonight"        "wc_theme=tokyonight; Path=/; Max-Age=31536000; SameSite=Lax; Secure";
 }
 
 # limit_req_zone wc_search ($binary_remote_addr, 10r/m) is declared in the
