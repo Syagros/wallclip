@@ -1,46 +1,111 @@
-# Requires in http block: limit_req_zone $binary_remote_addr zone=wc_search:1m rate=10r/m;
+# http-context: required before the server block
+# sudo mkdir -p /var/cache/nginx/wallclip before first use
+proxy_cache_path /var/cache/nginx/wallclip levels=1:2 keys_zone=wc_q:1m
+inactive=10m max_size=64m;
 
-location = /wallpapers {
-	return 301 /wallpapers/;
+# Exact-match on $args: only a bare ?theme=... touches the cookie, so
+# /search?q= refreshes leave it alone.
+map $args $wc_theme_cookie {
+	default                   "";
+	"theme="                  "wc_theme=; Path=/; Max-Age=0";
+	"theme=default-light"     "wc_theme=default-light; Path=/; Max-Age=31536000; SameSite=Lax";
+	"theme=gruvbox"           "wc_theme=gruvbox; Path=/; Max-Age=31536000; SameSite=Lax";
+	"theme=gruvbox-light"     "wc_theme=gruvbox-light; Path=/; Max-Age=31536000; SameSite=Lax";
+	"theme=catppuccin"        "wc_theme=catppuccin; Path=/; Max-Age=31536000; SameSite=Lax";
+	"theme=tokyonight"        "wc_theme=tokyonight; Path=/; Max-Age=31536000; SameSite=Lax";
 }
 
-location /wallpapers/ {
-	proxy_pass http://anubis_wallclip/;
-	include snippets/proxy_base.conf;
-	proxy_set_header Accept-Encoding "";  # sub_filter needs uncompressed bodies
+# limit_req_zone wc_search ($binary_remote_addr, 10r/m) is declared in the
+# deployed site config; do not redefine it here.
+server {
+	include snippets/listen_https.inc;
+	server_name wallpapers.voidx0.com;
 
-		sub_filter_once off;
-	sub_filter 'href="/files/'      'href="/wallpapers/files/';
-	sub_filter 'src="/files/'       'src="/wallpapers/files/';
-	sub_filter 'href="/style.css"'  'href="/wallpapers/style.css"';
-	sub_filter 'href="/themes.css"' 'href="/wallpapers/themes.css"';
-	sub_filter 'action="/search"'   'action="/wallpapers/search"';
-	sub_filter 'action="/"'         'action="/wallpapers/"';
-	sub_filter 'href="/search"'     'href="/wallpapers/search"';
-	sub_filter 'href="/"'           'href="/wallpapers/"';
+	ssl_certificate /etc/letsencrypt/live/voidx0.com/fullchain.pem;
+	ssl_certificate_key /etc/letsencrypt/live/voidx0.com/privkey.pem;
+	include /etc/letsencrypt/options-ssl-nginx.conf;
+	ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
-# Exact location shadows the prefix one: proxy_pass and sub_filters must be repeated.
-	location = /wallpapers/search {
+	include snippets/security_headers.inc;
+
+	root /home/oc/Projects/wallclip/www;
+
+	add_header Content-Security-Policy
+		"default-src 'self'; img-src 'self'; style-src 'self'; frame-ancestors 'none'";
+	server_tokens off;
+
+	ssi on;
+	add_header Set-Cookie $wc_theme_cookie;  # empty value: no header
+
+	location = / {
+		try_files /index.html =404;
+	}
+
+	location = /search {
 		limit_req zone=wc_search burst=5 nodelay;
 		limit_req_status 429;
 
-# URI required: exact match would otherwise proxy to "/".
-		proxy_pass http://anubis_wallclip/search;
-		include snippets/proxy_base.conf;
-		proxy_set_header Accept-Encoding "";
+		try_files /search.html =404;
+	}
+
+	location ~ ^/(style|themes)\.css$ {
+		expires 1h;
+	}
+
+# Landing grid: autoindex rewritten into thumbnail imgs inside links to originals
+	location /_home/ {
+		internal;
+		alias /mnt/HDD/Wallpapers-Flat/;
+		autoindex on;
+
+		sub_filter_types *;
 		sub_filter_once off;
-		sub_filter 'href="/files/'      'href="/wallpapers/files/';
-		sub_filter 'src="/files/'       'src="/wallpapers/files/';
-		sub_filter 'href="/style.css"'  'href="/wallpapers/style.css"';
-		sub_filter 'href="/themes.css"' 'href="/wallpapers/themes.css"';
-		sub_filter 'action="/search"'   'action="/wallpapers/search"';
-		sub_filter 'href="/search"'     'href="/wallpapers/search"';
-		sub_filter 'href="/"'           'href="/wallpapers/"';
+# must precede the '<a href="' rule: drops the "../" row
+		sub_filter '<pre><a href="../">../</a>\r\n' '<pre>';
+		sub_filter '<a href="' '<a target="_blank" rel="noopener" href="/files/';
+		sub_filter '">'        '"><img loading="lazy" src="/files/.thumbnails/';
+		sub_filter '</a>'      '"></a><span hidden>';
+		sub_filter '\r\n'      '</span>\r\n';
+# known gap: filenames are not URL-encoded (raw spaces in href/src)
+	}
+
+# Search: socket returns "<full-res>\t<thumb>" per line, turned into <a><img> tags
+	location /_q/ {
+		internal;
+		rewrite ^/_q/(.*)$ /$1 break;
+		proxy_pass http://unix:/run/wallclip/socket:/;
+		proxy_set_header Accept-Encoding "";
+
+# Key on $uri: $arg_q is empty in SSI subrequests
+		proxy_cache wc_q;
+		proxy_cache_key "$uri";
+		proxy_cache_valid 200 10m;
+
+		sub_filter_types *;
+		sub_filter_once off;
+# literal tab (nginx does not parse \t)
+		sub_filter '	/mnt/HDD/Wallpapers-Flat/' '"><img loading="lazy" src="/files/';
+		sub_filter '\n/mnt/HDD/Wallpapers-Flat/' '"></a><a target="_blank" rel="noopener" href="/files/';
+		sub_filter '/mnt/HDD/Wallpapers-Flat/' '/files/';
+# known quirk: last line's trailing newline stays in src; browsers strip it
+	}
+
+	location /files/ {
+		alias /mnt/HDD/Wallpapers-Flat/;
+		access_log off;  # one grid view fires ~200 image requests
+		expires 1d;
+	}
+
+	location / {
+		return 404;
 	}
 }
 
-# Anubis challenge assets, unprefixed
-location /.within.website/ {
-	proxy_pass http://anubis_wallclip;
-	include snippets/proxy_base.conf;
+server {
+	server_name wallpapers.voidx0.com;
+	include snippets/listen_http.inc;
+	if ($host = wallpapers.voidx0.com) {
+		return 301 https://$host$request_uri;
+	}
+	return 404;
 }
