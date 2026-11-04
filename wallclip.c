@@ -57,12 +57,14 @@ struct option long_options[] = {
 	{ "verbose", no_argument,       0, 'v' },
 	{ "delete",  required_argument, 0, 'd' },
 	{ "query",  required_argument, 0, 'q' },
+	{ "n_threads", required_argument, 0, 't'},
 	{ "help",  no_argument, 0, 'h' },
 	{ 0, 0, 0, 0 }
 };
 
 static volatile sig_atomic_t stop_requested;
 static int stop_pipe[2] = { -1, -1 }; // self-pipe: poll() can't see a flag, but it sees a byte
+static int n_threads = 4; // CLIP encoder threads, set by -t/--n_threads
 
 static void on_stop_signal(int sig) {
 	(void)sig;
@@ -83,6 +85,7 @@ static void usage(FILE *out) {
 			"\n"
 			"Options:\n"
 			"  -v, --verbose\n"
+			"  -t, --n_threads N\n"
 			"  -d, --delete\n"
 			"  -h, --help\n");
 }
@@ -202,7 +205,7 @@ static float *encode_image_embedding(struct clip_ctx *ctx, const char *path,
 		goto cleanup;
 	}
 
-	if (!clip_image_encode(ctx, 4, img_f32, vec, true)) {
+	if (!clip_image_encode(ctx, n_threads, img_f32, vec, true)) {
 		Errorf(E_FAIL, "clip encode failed for '%s'", path);
 		goto cleanup;
 	}
@@ -251,7 +254,7 @@ int query(char *query, struct clip_ctx *clip_ctx, PGconn *conn,
 		Errnof(E_FAIL, "malloc failed for text vector");
 		goto cleanup;
 	}
-	if (!clip_text_encode(clip_ctx, 4, &tokens, vec, true)) {
+	if (!clip_text_encode(clip_ctx, n_threads, &tokens, vec, true)) {
 		Errorf(E_FAIL, "failed to encode query");
 		goto cleanup;
 	}
@@ -1373,7 +1376,7 @@ int main(int argc, char *argv[]) {
 	char *sockp = NULL;
 	int cli_verbosity = 0;
 
-	while ((c = getopt_long(argc, argv, "d:q:vh", long_options, NULL)) != -1) {
+	while ((c = getopt_long(argc, argv, "d:q:vht:", long_options, NULL)) != -1) {
 		switch (c) {
 			case 'd': {
 				char **next = realloc(del_paths,
@@ -1391,6 +1394,14 @@ int main(int argc, char *argv[]) {
 			case 'q':
 				is_query = true;
 				query_str = optarg;
+				break;
+			case 't':
+				n_threads = atoi(optarg);
+				if (n_threads < 1) {
+					Errorf(E_CRIT, "invalid thread count '%s'", optarg);
+					rc = EXIT_USAGE;
+					goto cleanup;
+				}
 				break;
 			case 'v':
 				if (cli_verbosity < 3)
