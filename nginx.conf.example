@@ -1,7 +1,6 @@
-# http-context: required before the server block
-# sudo mkdir -p /var/cache/nginx/wallclip before first use
 proxy_cache_path /var/cache/nginx/wallclip levels=1:2 keys_zone=wc_q:1m
 inactive=10m max_size=64m;
+limit_req_zone $binary_remote_addr zone=wc_search:1m rate=10r/m;
 
 # Exact-match on $args: only a bare ?theme=... touches the cookie, so
 # /search?q= refreshes leave it alone.
@@ -15,20 +14,22 @@ map $args $wc_theme_cookie {
 	"theme=tokyonight"        "wc_theme=tokyonight; Path=/; Max-Age=31536000; SameSite=Lax; Secure";
 }
 
-# limit_req_zone wc_search ($binary_remote_addr, 10r/m) is declared in the
-# deployed site config; do not redefine it here.
 server {
-	include snippets/listen_https.inc;
-	server_name wallpapers.voidx0.com;
+	listen 443 ssl;
+	listen [::]:443 ssl;
+	server_name example.com;
+	ssl_certificate /path/to/example.com/fullchain.pem;
+	ssl_certificate_key /path/to/example.com/privkey.pem;
+	include /path/to/options-ssl-nginx.conf;
+	ssl_dhparam /path/to/ssl-dhparams.pem;
 
-	ssl_certificate /etc/letsencrypt/live/voidx0.com/fullchain.pem;
-	ssl_certificate_key /etc/letsencrypt/live/voidx0.com/privkey.pem;
-	include /etc/letsencrypt/options-ssl-nginx.conf;
-	ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+	access_log /dev/null;
+	error_log /var/log/nginx/wallclip.err;
 
-	include snippets/security_headers.inc;
+	add_header X-Content-Type-Options "nosniff" always;
+	add_header Referrer-Policy "no-referrer" always;
 
-	root /home/oc/Projects/wallclip/www;
+	root /var/www/example.com/wallclip/www;
 
 	add_header Content-Security-Policy
 		"default-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
@@ -55,7 +56,7 @@ server {
 # Landing grid: autoindex rewritten into thumbnail imgs inside links to originals
 	location /_home/ {
 		internal;
-		alias /mnt/HDD/Wallpapers-Flat/;
+		alias /path/to/gallery/;
 		autoindex on;
 
 		sub_filter_types *;
@@ -84,14 +85,14 @@ server {
 		sub_filter_types *;
 		sub_filter_once off;
 # literal tab (nginx does not parse \t)
-		sub_filter '	/mnt/HDD/Wallpapers-Flat/' '"><img loading="lazy" src="/files/';
-		sub_filter '\n/mnt/HDD/Wallpapers-Flat/' '"></a><a target="_blank" rel="noopener" href="/files/';
-		sub_filter '/mnt/HDD/Wallpapers-Flat/' '/files/';
+		sub_filter '	/path/to/gallery/' '"><img loading="lazy" src="/files/';
+		sub_filter '\n/path/to/gallery/' '"></a><a target="_blank" rel="noopener" href="/files/';
+		sub_filter '/path/to/gallery/' '/files/';
 # known quirk: last line's trailing newline stays in src; browsers strip it
 	}
 
 	location /files/ {
-		alias /mnt/HDD/Wallpapers-Flat/;
+		alias /path/to/gallery/;
 		access_log off;  # one grid view fires ~200 image requests
 		expires 1d;
 	}
@@ -102,10 +103,8 @@ server {
 }
 
 server {
-	server_name wallpapers.voidx0.com;
-	include snippets/listen_http.inc;
-	if ($host = wallpapers.voidx0.com) {
-		return 301 https://$host$request_uri;
-	}
-	return 404;
+	listen 80;
+	listen [::]:80;
+	server_name example.com;
+	return 301 https://$host$request_uri;
 }
