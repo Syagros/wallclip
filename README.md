@@ -77,6 +77,7 @@ wallclip -d FILE
 
 Options:
   -v, --verbose
+  -t, --n_threads N
   -d, --delete
   -h, --help
 ```
